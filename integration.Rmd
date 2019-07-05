@@ -1,0 +1,1018 @@
+---
+title: "Integration"
+author: "Kendall Anderson"
+date: "6/8/2019"
+output: html_document
+---
+
+```{r Import libraries and data}
+library(ggplot2)
+library(ggrepel)
+library(dplyr)
+library(plyr)
+
+# rna all genes and all comparisons combined
+rna <- read.csv("/Users/kendallanderson/Documents/HMA Project/RNASeq/Gene_Lists/merged_sig_genes.csv")
+
+# rna individual comparison lists
+rna_R1 <- read.csv("/Users/kendallanderson/Documents/HMA Project/RNASeq/Gene_Lists/resist1_fc1_pval001.csv")
+rna_R2 <- read.csv("/Users/kendallanderson/Documents/HMA Project/RNASeq/Gene_Lists/resist2_fc1_pval001.csv")
+rna_R3 <- read.csv("/Users/kendallanderson/Documents/HMA Project/RNASeq/Gene_Lists/resist3_fc1_pval001.csv")
+rna_R4 <- read.csv("/Users/kendallanderson/Documents/HMA Project/RNASeq/Gene_Lists/resist4_fc1_pval001.csv")
+rna_T1 <- read.csv("/Users/kendallanderson/Documents/HMA Project/RNASeq/Gene_Lists/treat1_fc1_pval001.csv")
+rna_T2 <- read.csv("/Users/kendallanderson/Documents/HMA Project/RNASeq/Gene_Lists/treat2_fc1_pval001.csv")
+rna_T3 <- read.csv("/Users/kendallanderson/Documents/HMA Project/RNASeq/Gene_Lists/treat3_fc1_pval001.csv")
+rna_T4 <- read.csv("/Users/kendallanderson/Documents/HMA Project/RNASeq/Gene_Lists/treat4_fc1_pval001.csv")
+
+# methylation individual comparison lists
+R1 <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R1_sig_genes.csv")
+R2 <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R2_sig_genes.csv")
+R3 <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R3_sig_genes.csv")
+R4 <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R4_sig_genes.csv")
+T1 <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T1_sig_genes.csv")
+T2 <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T2_sig_genes.csv")
+T3 <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T3_sig_genes.csv")
+T4 <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T4_sig_genes.csv")
+
+HEL_four <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/HEL_deltas_four.csv")
+HEL_twelve <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/HEL_deltas_twelve.csv")
+HEL_two_opp <- read.csv("/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/HEL_deltas_two_opp.csv")
+
+all_rna <- read.csv("/Users/kendallanderson/Documents/HMA Project/RNASeq/combined_rna_expr_analysis.csv")
+```
+ 
+ ~~~
+ 
+ ### Averaging Method ###
+ 
+```{r Average deltas for R1}
+R1_avg <- aggregate(DataFrame(R1$R1_delta), list(R1$GeneID), mean)
+R1_avg <- as.data.frame(R1_avg)
+colnames(R1_avg) <- c("GeneID","R1_delta")
+
+R1_int_avg <- left_join(R1_avg,rna[,c(2:5)],by="GeneID")
+R1_int_avg <- remove_missing(R1_int_avg)
+R1_int_avg$R1_log2FC[R1_int_avg$R1_log2FC==Inf] <- 10
+R1_int_avg$R1_log2FC[R1_int_avg$R1_log2FC==(-Inf)] <- -10
+
+ggplot(R1_int_avg, aes(x=R1_delta, y=R1_log2FC, label=GeneID)) +
+  geom_jitter(aes(alpha=0.2)) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  ggtitle("R1") + xlab("Delta Value") + ylab("Log2FC")
+  #geom_text_repel(data = subset(R1_int_avg, R1_pval<0.001), size=2)
+```
+
+```{r Average deltas for R2}
+R2_avg <- aggregate(DataFrame(R2$R2_delta), list(R2$GeneID), mean)
+R2_avg <- as.data.frame(R2_avg)
+colnames(R2_avg) <- c("GeneID","R2_delta")
+
+R2_int_avg <- left_join(R2_avg,rna[,c(2,6:8)],by="GeneID")
+R2_int_avg <- remove_missing(R2_int_avg)
+R2_int_avg$R2_log2FC[R2_int_avg$R2_log2FC==Inf] <- 10
+R2_int_avg$R2_log2FC[R2_int_avg$R2_log2FC==(-Inf)] <- -10
+
+ggplot(R2_int_avg, aes(x=R2_delta, y=R2_log2FC, label=GeneID)) +
+  geom_jitter(aes(alpha=0.2)) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0) +
+  ggtitle("R2") +
+  geom_text_repel(data = subset(R2_int_avg, (abs(R2_log2FC)>5 & R2_pval<0.00001)), size=2)
+```
+
+```{r Average deltas for T1}
+T1_avg <- aggregate(DataFrame(T1$T1_delta), list(T1$GeneID), mean)
+T1_avg <- as.data.frame(T1_avg)
+colnames(T1_avg) <- c("GeneID","T1_delta")
+
+T1_int_avg <- left_join(T1_avg,rna[,c(2,15:17)],by="GeneID")
+T1_int_avg <- remove_missing(T1_int_avg)
+T1_int_avg$T1_log2FC[T1_int_avg$T1_log2FC==Inf] <- 10
+T1_int_avg$T1_log2FC[T1_int_avg$T1_log2FC==(-Inf)] <- -10
+
+ggplot(T1_int_avg, aes(x=T1_delta, y=T1_log2FC, label=GeneID)) +
+  geom_jitter(aes(alpha=0.2)) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0) +
+  ggtitle("T1") +
+  geom_text_repel(data = subset(T1_int_avg, abs(T1_log2FC)>2), size=2)
+```
+
+```{r Average deltas for T2}
+T2_avg <- aggregate(DataFrame(T2$T2_delta), list(T2$GeneID), mean)
+T2_avg <- as.data.frame(T2_avg)
+colnames(T2_avg) <- c("GeneID","T2_delta")
+
+T2_int_avg <- left_join(T2_avg,rna[,c(2,18:20)],by="GeneID")
+T2_int_avg <- remove_missing(T2_int_avg)
+T2_int_avg$T2_log2FC[T2_int_avg$T2_log2FC==Inf] <- 10
+T2_int_avg$T2_log2FC[T2_int_avg$T2_log2FC==(-Inf)] <- -10
+
+View(T2_int_avg)
+
+ggplot(T2_int_avg, aes(x=T2_delta, y=T2_log2FC, label=GeneID)) +
+  geom_jitter(aes(alpha=0.2)) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0) +
+  ggtitle("T2") +
+  geom_text_repel(data = subset(T2_int_avg, (abs(T2_log2FC)>5 & T2_pval<0.0001)), size=2)
+```
+
+```{r Average deltas for T3}
+T3_avg <- aggregate(DataFrame(T3$T3_delta), list(T3$GeneID), mean)
+T3_avg <- as.data.frame(T3_avg)
+colnames(T3_avg) <- c("GeneID","T3_delta")
+
+T3_int_avg <- left_join(T3_avg,rna[,c(2,21:23)],by="GeneID")
+T3_int_avg <- remove_missing(T3_int_avg)
+T3_int_avg$T3_log2FC[T3_int_avg$T3_log2FC==Inf] <- 10
+T3_int_avg$T3_log2FC[T3_int_avg$T3_log2FC==(-Inf)] <- -10
+
+View(T3_avg)
+```
+
+```{r Average deltas for T4}
+T4_avg <- aggregate(DataFrame(T4$T4_delta), list(T4$GeneID), mean)
+T4_avg <- as.data.frame(T4_avg)
+colnames(T4_avg) <- c("GeneID","T4_delta")
+
+T4_int_avg <- left_join(T4_avg,rna[,c(2,24:26)],by="GeneID")
+T4_int_avg <- remove_missing(T4_int_avg)
+T4_int_avg$T4_log2FC[T4_int_avg$T4_log2FC==Inf] <- 10
+T4_int_avg$T4_log2FC[T4_int_avg$T4_log2FC==(-Inf)] <- -10
+
+View(T4_int_avg)
+```
+
+~~~ 
+
+### Use methylation data as reference ###
+
+```{r Merge methylation and all rna diff expr genes}
+# combine methylation data with RNA seq analysis data
+R1_int <- left_join(R1[,2:7],rna[,2:5],by="GeneID")
+# remove those that don't appear in the RNA data
+R1_int <- remove_missing(R1_int)
+# replace inf values with 10 because that is the max that I'm plotting
+R1_int$R1_log2FC[R1_int$R1_log2FC==Inf] <- 10
+R1_int$R1_log2FC[R1_int$R1_log2FC==(-Inf)] <- -10
+
+R2_int <- left_join(R2[,2:7],rna[,c(2,6:8)],by="GeneID")
+R2_int <- remove_missing(R2_int)
+R2_int$R2_log2FC[R2_int$R2_log2FC==Inf] <- 10
+R2_int$R2_log2FC[R2_int$R2_log2FC==(-Inf)] <- -10
+
+T1_int <- left_join(T1[,2:6],rna[,c(2,15:17)],by="GeneID")
+T1_int <- remove_missing(T1_int)
+T1_int$T1_log2FC[T1_int$T1_log2FC==Inf] <- 10
+T1_int$T1_log2FC[T1_int$T1_log2FC==(-Inf)] <- -10
+
+T2_int <- left_join(T2[,2:6],rna[,c(2,18:20)],by="GeneID")
+T2_int <- remove_missing(T2_int)
+T2_int$T2_log2FC[T2_int$T2_log2FC==Inf] <- 10
+T2_int$T2_log2FC[T2_int$T2_log2FC==(-Inf)] <- -10
+
+T3_int <- left_join(T3[,2:6],rna[,c(2,21:23)],by="GeneID")
+T3_int <- remove_missing(T3_int)
+T3_int$T3_log2FC[T3_int$T3_log2FC==Inf] <- 10
+T3_int$T3_log2FC[T3_int$T3_log2FC==(-Inf)] <- -10
+
+T4_int <- left_join(T4[,2:6],rna[,c(2,24:26)],by="GeneID")
+T4_int <- remove_missing(T4_int)
+T4_int$T4_log2FC[T4_int$T4_log2FC==Inf] <- 10
+T4_int$T4_log2FC[T4_int$T4_log2FC==(-Inf)] <- -10
+```
+
+```{r Plot methylation and rna analyses}
+png("R1_integration.png", units="in", width=7, height=5, res=300)
+ggplot(R1_int, aes(x=R1_delta, y=R1_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos), width=0.2, size=1, alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("R1") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+dev.off()
+  #geom_text_repel(data = subset(R1_int, ((abs(R1_log2FC)>5 & R1_delta < -0.5) | (abs(R1_log2FC)<(-5) & R1_delta > 0.5))), size=2)
+
+png("R2_integration.png", units="in", width=7, height=5, res=300)
+ggplot(R2_int, aes(x=R2_delta, y=R2_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos), width=0.2, size=1, alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("R2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+dev.off()
+  #geom_text_repel(data = subset(R2_int, R2_pval<0.0000000000000000001), size=2)
+
+
+png("T1_integration.png", units="in", width=7, height=5, res=300)
+ggplot(T1_int, aes(x=T1_delta, y=T1_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos),width=0.2,size=1,alpha=0.8) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  ggtitle("T1") + xlab("Delta Value") + ylab("Log2FC") +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="orange",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="khaki",
+                             "TSS200"="purple"),
+                    name="Position") 
+dev.off()
+  #geom_text_repel(data = subset(T1_int, T1_pval<0.001),size=2)
+
+png("T2_integration.png", units="in", width=7, height=5, res=300)
+ggplot(T2_int, aes(x=T2_delta, y=T2_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos),width=0.2,size=1,alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  ggtitle("T2") + xlab("Delta Value") + ylab("Log2FC") +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+dev.off()
+  #geom_text_repel(data = subset(T2_int, T2_pval<0.000000000001),size=2)
+```
+
+```{r T3 and T4 Integration Plots}
+png("T3_integration.png", units="in", width=7, height=5, res=300)
+ggplot(T3_int, aes(x=T3_delta, y=T3_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos),width=0.2,size=1,alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  ggtitle("T1") + xlab("Delta Value") + ylab("Log2FC") +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position")
+  #geom_text_repel(data = GeneID, size=2)
+
+dev.off()
+  
+png("T2_integration.png", units="in", width=7, height=5, res=300)
+ggplot(T4_int, aes(x=T4_delta, y=T4_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos),width=0.2,size=1,alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  ggtitle("T4") + xlab("Delta Value") + ylab("Log2FC") +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+dev.off()
+```
+
+```{r Merge methylation and only specific diff expr genes- R1}
+# combine methylation data with RNA seq analysis data
+R1_int_spec <- left_join(R1[,2:7],rna_R1[,2:4],by="GeneID")
+# remove those that don't appear in the RNA data
+R1_int_spec <- remove_missing(R1_int_spec)
+# replace inf values with 10 because that is the max that I'm plotting
+R1_int_spec$log2FoldChange[R1_int_spec$log2FoldChange==Inf] <- 10
+R1_int_spec$log2FoldChange[R1_int_spec$log2FoldChange==(-Inf)] <- -10
+
+png("R1_int_specific.png", units="in", width=7, height=5, res=300)
+ggplot(R1_int_spec, aes(x=R1_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=cgPos), width=0.2, size=1, alpha=1) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("R1") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="#72e5ef",
+                             "3'UTR"="#369094",
+                             "5'UTR"="#38f0ac",
+                             "Body"="#214d4e",
+                             "TSS1500"="#b9e09b",
+                             "TSS200"="#338821"),
+                    name="Position")
+ # geom_text_repel(data = R1_int_spec, size=2)
+dev.off()
+```
+
+```{r Merge methylation and only specific diff expr genes- R2}
+# combine methylation data with RNA seq analysis data
+R2_int_spec <- left_join(R2[,2:7],rna_R2[,2:4],by="GeneID")
+# remove those that don't appear in the RNA data
+R2_int_spec <- remove_missing(R2_int_spec)
+# replace inf values with 10 because that is the max that I'm plotting
+R2_int_spec$log2FoldChange[R2_int_spec$log2FoldChange==Inf] <- 10
+R2_int_spec$log2FoldChange[R2_int_spec$log2FoldChange==(-Inf)] <- -10
+
+png("R2_int_specific.png", units="in", width=7, height=5, res=300)
+ggplot(R2_int_spec, aes(x=R2_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=cgPos), width=0.2, size=1, alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("R2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="#72e5ef",
+                             "3'UTR"="#369094",
+                             "5'UTR"="#38f0ac",
+                             "Body"="#214d4e",
+                             "TSS1500"="#b9e09b",
+                             "TSS200"="#338821"),
+                    name="Position")
+  #geom_text_repel(data = subset(R2_int_spec, pval<0.00000000000000001), size=2)
+dev.off()
+
+#View(R2_int_spec)
+#View(subset(R2_int_spec, GeneID=="GAL"))
+```
+
+```{r Merge methylation and only specific diff expr genes- T1}
+# combine methylation data with RNA seq analysis data
+T1_int_spec <- left_join(T1[,2:7],rna_T1[,2:4],by="GeneID")
+# remove those that don't appear in the RNA data
+T1_int_spec <- remove_missing(T1_int_spec)
+# replace inf values with 10 because that is the max that I'm plotting
+T1_int_spec$log2FoldChange[T1_int_spec$log2FoldChange==Inf] <- 10
+T1_int_spec$log2FoldChange[T1_int_spec$log2FoldChange==(-Inf)] <- -10
+
+png("T1_int_specific.png", units="in", width=7, height=5, res=300)
+ggplot(T1_int_spec, aes(x=T1_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=cgPos), width=0.2, size=2, alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("T1") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                values=c("1stExon"="#72e5ef",
+                             "3'UTR"="#369094",
+                             "5'UTR"="#38f0ac",
+                             "Body"="#214d4e",
+                             "TSS1500"="#b9e09b",
+                             "TSS200"="#338821"),
+                    name="Position") +
+  geom_text_repel(data = T1_int_spec, size=2)
+dev.off()
+```
+
+```{r Merge methylation and only specific diff expr genes- T2}
+# combine methylation data with RNA seq analysis data
+T2_int_spec <- left_join(T2[,2:7],rna_T2[,2:4],by="GeneID")
+# remove those that don't appear in the RNA data
+T2_int_spec <- remove_missing(T2_int_spec)
+# replace inf values with 10 because that is the max that I'm plotting
+T2_int_spec$log2FoldChange[T2_int_spec$log2FoldChange==Inf] <- 10
+T2_int_spec$log2FoldChange[T2_int_spec$log2FoldChange==(-Inf)] <- -10
+
+png("T2_int_specific.png", units="in", width=7, height=5, res=300)
+ggplot(T2_int_spec, aes(x=T2_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=cgPos), width=0.2, size=2, alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("T2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                values=c("1stExon"="#72e5ef",
+                             "3'UTR"="#369094",
+                             "5'UTR"="#38f0ac",
+                             "Body"="#214d4e",
+                             "TSS1500"="#b9e09b",
+                             "TSS200"="#338821"),
+                    name="Position")
+dev.off()
+View(T2_int_spec)
+```
+
+~~~
+
+### Use RNASeq data as reference ###
+
+```{r RNA sig genes}
+R1_int_rna <- left_join(rna_R1[,2:4],R1[2:7], by="GeneID")
+R1_int_rna <- remove_missing(R1_int_rna)
+R1_int_rna$log2FoldChange[R1_int_rna$log2FoldChange==Inf|R1_int_rna$log2FoldChange>10] <- 10
+R1_int_rna$log2FoldChange[R1_int_rna$log2FoldChange==(-Inf)] <- -10
+# generate overlapping gene list
+R1_int_genes <- unique(R1_int_rna$GeneID)
+#write.csv(R1_int_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/R1_int_genes.csv")
+
+R2_int_rna <- left_join(rna_R2[,2:4],R2[2:7], by="GeneID")
+R2_int_rna <- remove_missing(R2_int_rna)
+R2_int_rna$log2FoldChange[R2_int_rna$log2FoldChange==Inf|R2_int_rna$log2FoldChange>10] <- 10
+R2_int_rna$log2FoldChange[R2_int_rna$log2FoldChange==(-Inf)] <- -10
+# generate overlapping gene list
+R2_int_genes <- unique(R2_int_rna$GeneID)
+#write.csv(R2_int_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/R2_int_genes.csv")
+
+R3_int_rna <- left_join(rna_R3[,2:4],R3[2:7], by="GeneID")
+R3_int_rna <- remove_missing(R3_int_rna)
+R3_int_rna$log2FoldChange[R3_int_rna$log2FoldChange==Inf|R3_int_rna$log2FoldChange>10] <- 10
+R3_int_rna$log2FoldChange[R3_int_rna$log2FoldChange==(-Inf)] <- -10
+# generate overlapping gene list
+R3_int_genes <- unique(R3_int_rna$GeneID)
+#write.csv(R3_int_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/R3_int_genes.csv")
+
+R4_int_rna <- left_join(rna_R4[,2:4],R4[2:7], by="GeneID")
+R4_int_rna <- remove_missing(R4_int_rna)
+R4_int_rna$log2FoldChange[R4_int_rna$log2FoldChange==Inf|R4_int_rna$log2FoldChange>10] <- 10
+R4_int_rna$log2FoldChange[R4_int_rna$log2FoldChange==(-Inf)] <- -10
+# generate overlapping gene list
+R4_int_genes <- unique(R4_int_rna$GeneID)
+#write.csv(R4_int_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/R4_int_genes.csv")
+
+T1_int_rna <- left_join(rna_T1[,2:4],T1[2:7], by="GeneID")
+T1_int_rna <- remove_missing(T1_int_rna)
+T1_int_rna$log2FoldChange[T1_int_rna$log2FoldChange==Inf|T1_int_rna$log2FoldChange>10] <- 10
+T1_int_rna$log2FoldChange[T1_int_rna$log2FoldChange==(-Inf)] <- -10
+# generate overlapping gene list
+T1_int_genes <- unique(T1_int_rna$GeneID)
+#write.csv(T1_int_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T1_int_genes.csv")
+
+T2_int_rna <- left_join(rna_T2[,2:4],T2[2:7], by="GeneID")
+T2_int_rna <- remove_missing(T2_int_rna)
+T2_int_rna$log2FoldChange[T2_int_rna$log2FoldChange==Inf|T2_int_rna$log2FoldChange>10] <- 10
+T2_int_rna$log2FoldChange[T2_int_rna$log2FoldChange==(-Inf)] <- -10
+# generate overlapping gene list
+T2_int_genes <- unique(T2_int_rna$GeneID)
+#write.csv(T2_int_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T2_int_genes.csv")
+
+T3_int_rna <- left_join(rna_T3[,2:4],T3[2:7], by="GeneID")
+T3_int_rna <- remove_missing(T3_int_rna)
+T3_int_rna$log2FoldChange[T3_int_rna$log2FoldChange==Inf|T3_int_rna$log2FoldChange>10] <- 10
+T3_int_rna$log2FoldChange[T3_int_rna$log2FoldChange==(-Inf)] <- -10
+# generate overlapping gene list
+T3_int_genes <- unique(T3_int_rna$GeneID)
+#write.csv(T3_int_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T3_int_genes.csv")
+
+T4_int_rna <- left_join(rna_T4[,2:4],T4[2:7], by="GeneID")
+T4_int_rna <- remove_missing(T4_int_rna)
+T4_int_rna$log2FoldChange[T4_int_rna$log2FoldChange==Inf|T4_int_rna$log2FoldChange>10] <- 10
+T4_int_rna$log2FoldChange[T4_int_rna$log2FoldChange==(-Inf)] <- -10
+# generate overlapping gene list
+T4_int_genes <- unique(T4_int_rna$GeneID)
+#write.csv(T4_int_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T4_int_genes.csv")
+```
+
+```{r RNA sig genes split by up and down reg}
+R1_int_rna_up <- subset(R1_int_rna, log2FoldChange>0)
+R1_int_rna_up_genes <- unique(R1_int_rna_up$GeneID)
+write.csv(R1_int_rna_up_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/R1_int_genes_up.csv")
+
+R1_int_rna_down <- subset(R1_int_rna, log2FoldChange<0)
+R1_int_rna_down_genes <- unique(R1_int_rna_down$GeneID)
+#write.csv(R1_int_rna_down_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/R1_int_genes_down.csv")
+
+R2_int_rna_up <- subset(R2_int_rna, log2FoldChange>0)
+R2_int_rna_up_genes <- unique(R2_int_rna_up$GeneID)
+write.csv(R2_int_rna_up_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/R2_int_genes_up.csv")
+
+R2_int_rna_down <- subset(R2_int_rna, log2FoldChange<0)
+R2_int_rna_down_genes <- unique(R2_int_rna_down$GeneID)
+write.csv(R2_int_rna_down_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/R2_int_genes_down.csv")
+
+T1_int_rna_up <- subset(T1_int_rna, log2FoldChange>0)
+T1_int_rna_up_genes <- unique(T1_int_rna_up$GeneID)
+write.csv(T1_int_rna_up_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T1_int_genes_up.csv")
+
+T1_int_rna_down <- subset(T1_int_rna, log2FoldChange<0)
+T1_int_rna_down_genes <- unique(T1_int_rna_down$GeneID)
+write.csv(T1_int_rna_down_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T1_int_genes_down.csv")
+
+T2_int_rna_up <- subset(T2_int_rna, log2FoldChange>0)
+T2_int_rna_up_genes <- unique(T2_int_rna_up$GeneID)
+write.csv(T2_int_rna_up_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T2_int_genes_up.csv")
+
+T2_int_rna_down <- subset(T2_int_rna, log2FoldChange<0)
+T2_int_rna_down_genes <- unique(T2_int_rna_down$GeneID)
+write.csv(T2_int_rna_down_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T2_int_genes_down.csv")
+
+T3_int_rna_up <- subset(T3_int_rna, log2FoldChange>0)
+T3_int_rna_up_genes <- unique(T3_int_rna_up$GeneID)
+write.csv(T3_int_rna_up_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T3_int_genes_up.csv")
+
+T3_int_rna_down <- subset(T3_int_rna, log2FoldChange<0)
+T3_int_rna_down_genes <- unique(T3_int_rna_down$GeneID)
+write.csv(T3_int_rna_down_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T3_int_genes_down.csv")
+
+T4_int_rna_up <- subset(T4_int_rna, log2FoldChange>0)
+T4_int_rna_up_genes <- unique(T4_int_rna_up$GeneID)
+write.csv(T4_int_rna_up_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T4_int_genes_up.csv")
+
+T4_int_rna_down <- subset(T4_int_rna, log2FoldChange<0)
+T4_int_rna_down_genes <- unique(T4_int_rna_down$GeneID)
+write.csv(T4_int_rna_down_genes, file="/Users/kendallanderson/Documents/HMA Project/Int_Gene_Lists/T4_int_genes_down.csv")
+
+```
+
+```{r}
+ggplot(R1_int_rna, aes(x=R1_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=cgPos),width=0.2,size=1) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0) +
+  geom_text_repel(data=subset(R1_int_rna,abs(log2FoldChange)>2),size=2)
+```
+
+```{r}
+R1_int_body <- subset(R1_int, cgPos=="Body")
+R1_int_3UTR <- subset(R1_int, cgPos=="3'UTR")
+R1_int_5UTR <- subset(R1_int, cgPos=="5'UTR")
+R1_int_TSS1500 <- subset(R1_int, cgPos=="TSS1500")
+R1_int_TSS200 <- subset(R1_int, cgPos=="TSS200")
+R1_int_1stexon <- subset(R1_int, cgPos=="1stExon")
+```
+
+```{r}
+ggplot(R1_int_body, aes(x=R1_delta, y=R1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+
+ggplot(R1_int_3UTR, aes(x=R1_delta, y=R1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+
+ggplot(R1_int_5UTR, aes(x=R1_delta, y=R1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+
+ggplot(R1_int_TSS1500, aes(x=R1_delta, y=R1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+
+ggplot(R1_int_TSS200, aes(x=R1_delta, y=R1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+
+ggplot(R1_int_1stexon, aes(x=R1_delta, y=R1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+```
+
+~~~
+
+### Separating by cgPos ###
+
+```{r}
+T1_int_body <- subset(T1_int, cgPos=="Body")
+T1_int_3UTR <- subset(T1_int, cgPos=="3'UTR")
+T1_int_5UTR <- subset(T1_int, cgPos=="5'UTR")
+T1_int_TSS1500 <- subset(T1_int, cgPos=="TSS1500")
+T1_int_TSS200 <- subset(T1_int, cgPos=="TSS200")
+T1_int_1stexon <- subset(T1_int, cgPos=="1stExon")
+```
+
+```{r}
+ggplot(T1_int_body, aes(x=T1_delta, y=T1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+
+ggplot(T1_int_3UTR, aes(x=T1_delta, y=T1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+
+ggplot(T1_int_5UTR, aes(x=T1_delta, y=T1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+
+ggplot(T1_int_TSS1500, aes(x=T1_delta, y=T1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+
+ggplot(T1_int_TSS200, aes(x=T1_delta, y=T1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+
+ggplot(T1_int_1stexon, aes(x=T1_delta, y=T1_log2FC)) +
+  geom_jitter() +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0)
+```
+
+~~~
+
+### Plotting 
+
+```{r}
+ggplot(T1_int, aes(x=T1_delta, y=T1_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos)) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0) +
+  geom_vline(xintercept=0) +
+  geom_text(aes(label=ifelse(abs(T1_log2FC)>1,as.character(GeneID),'')),hjust=0,vjust=0,cex=2)
+```
+
+~~~
+
+### Plot HEL RNA overlap with methylation ###
+
+```{r HEL four integrated}
+View(HEL_four_int)
+# combine methylation data with RNA seq analysis data
+HEL_four_int <- left_join(HEL_four[,2:9],rna[,c(2,6:8,18:20,24:26)],by="GeneID")
+# replace inf values with 10 because that is the max that I'm plotting
+HEL_four_int$R2_log2FC[HEL_four_int$R2_log2FC==Inf] <- 10
+HEL_four_int$R2_log2FC[HEL_four_int$R2_log2FC==(-Inf)] <- -10
+HEL_four_int$T2_log2FC[HEL_four_int$T2_log2FC==Inf] <- 10
+HEL_four_int$T2_log2FC[HEL_four_int$T2_log2FC==(-Inf)] <- -10
+HEL_four_int$T4_log2FC[HEL_four_int$T4_log2FC==Inf] <- 10
+HEL_four_int$T4_log2FC[HEL_four_int$T4_log2FC==(-Inf)] <- -10
+
+# plot R2
+ggplot(HEL_four_int, aes(x=R2_delta, y=R2_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos), width=0.2, size=1, alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("R2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+  #geom_text_repel(data = subset(HEL_four_int, cgPos=="1stExon"), size=2)
+
+# plot T2
+ggplot(HEL_four_int, aes(x=T2_delta, y=T2_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos), width=0.2, size=1, alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("T2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+
+ggplot(HEL_four_int, aes(x=T4_delta, y=T4_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos), width=0.2, size=1, alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("T4") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+```
+
+```{r HEL twelve integrated}
+# combine methylation data with RNA seq analysis data
+HEL_twelve_int <- left_join(HEL_twelve[,2:9],rna[,c(2,6:8,18:20,24:26)],by="GeneID")
+# replace inf values with 10 because that is the max that I'm plotting
+HEL_twelve_int$R2_log2FC[HEL_twelve_int$R2_log2FC==Inf] <- 10
+HEL_twelve_int$R2_log2FC[HEL_twelve_int$R2_log2FC==(-Inf)] <- -10
+HEL_twelve_int$T2_log2FC[HEL_twelve_int$T2_log2FC==Inf] <- 10
+HEL_twelve_int$T2_log2FC[HEL_twelve_int$T2_log2FC==(-Inf)] <- -10
+HEL_twelve_int$T4_log2FC[HEL_twelve_int$T4_log2FC==Inf] <- 10
+HEL_twelve_int$T4_log2FC[HEL_twelve_int$T4_log2FC==(-Inf)] <- -10
+
+# plot R2
+ggplot(HEL_twelve_int, aes(x=R2_delta, y=R2_log2FC, label=GeneID)) +
+  geom_jitter(aes(col=cgPos), width=0.2, size=1, alpha=0.5) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("R2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+  #geom_text_repel(data = subset(HEL_four_int, cgPos=="1stExon"), size=2)
+```
+
+```{r}
+HEL_two_opp_int <- left_join(HEL_two_opp[,2:9],all_rna[,c(2,6:8,18:20,24:26)],by="GeneID")
+
+# replace inf values with 10 because that is the max that I'm plotting
+HEL_two_opp_int$R2_log2FC[HEL_two_opp_int$R2_log2FC==Inf] <- 10
+HEL_two_opp_int$R2_log2FC[HEL_two_opp_int$R2_log2FC==(-Inf)] <- -10
+HEL_two_opp_int$T2_log2FC[HEL_two_opp_int$T2_log2FC==Inf] <- 10
+HEL_two_opp_int$T2_log2FC[HEL_two_opp_int$T2_log2FC==(-Inf)] <- -10
+HEL_two_opp_int$T4_log2FC[HEL_two_opp_int$T4_log2FC==Inf] <- 10
+HEL_two_opp_int$T4_log2FC[HEL_two_opp_int$T4_log2FC==(-Inf)] <- -10
+
+ggplot(HEL_two_opp_int, aes(x=R2_delta, y=R2_log2FC, label=GeneID)) +
+  geom_point(aes(col=cgPos, shape=GeneID), size=1, alpha=0.8) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("R2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+  #geom_text_repel(data = subset(HEL_two_opp_int, GeneID=="CDH3"), size=2)
+
+ggplot(HEL_two_opp_int, aes(x=T2_delta, y=T2_log2FC, label=GeneID)) +
+  geom_point(aes(col=cgPos, shape=GeneID), size=1, alpha=0.8) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("T2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+
+ggplot(HEL_two_opp_int, aes(x=T4_delta, y=T4_log2FC, label=GeneID)) +
+  geom_point(aes(col=cgPos, shape=GeneID), size=1, alpha=0.8) +
+  xlim(-1,1) +
+  ylim(-10,10) +
+  ggtitle("T4") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="cornflowerblue",
+                             "3'UTR"="indianred",
+                             "5'UTR"="mediumseagreen",
+                             "Body"="cornflowerblue",
+                             "TSS1500"="mediumseagreen",
+                             "TSS200"="mediumseagreen"),
+                    name="Position") 
+```
+
+
+```{r}
+subset(R1, GeneID=="IFI44L")
+subset(rna_R1, GeneID=="IFI44L")
+subset(betas_annotated, UCSC_RefGene_Name=="IFI44L")
+```
+
+```{r}
+subset(R1, GeneID=="IFI44L")
+```
+
+### PLOTS WITH LACROIX COLORS ###
+
+```{r}
+library(LaCroixColoR)
+lp <- lacroix_palette("PeachPear", type="discrete")
+lppf <- lacroix_palette("PassionFruit", type="discrete")
+
+library(jcolors)
+jp5 <- jcolors(palette="pal5")
+
+jp5
+```
+
+### Final Integration Figures ###
+
+```{r R1 Final Integration}
+#pos <- position_jitter(width = 0.25, seed = 1)
+
+png("R1_int_final.png", units="in", width=7, height=5, res=300)
+ggplot(R1_int_spec, aes(x=R1_delta, y=log2FoldChange, label=GeneID)) +
+  geom_point(position=pos, aes(col=CpG_Location), size=1.5, alpha=0.6) +
+  xlim(-1,1) +
+  ylim(-10.1,10.1) + 
+  xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_jcolors(palette="pal4") +
+  geom_text_repel(data=R1_int_spec, size=2.5, position = pos) 
+ # theme_dark()
+dev.off()
+```
+
+```{r R2 Final Integration}
+png("R2_int_final.png", units="in", width=7, height=5, res=300)
+ggplot(R2_int_spec, aes(x=R2_delta, y=log2FoldChange, label=GeneID)) +
+  geom_point(position=pos, aes(col=CpG_Location), size=1.5, alpha=0.6) +
+  xlim(-1,1) +
+  ylim(-10.1,10.1) +
+  xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_jcolors(palette="pal4") +
+  geom_text_repel(position=pos, data=subset(R2_int_spec, (log2FoldChange>7) & (R2_delta)<(-0.5)), size=2.5) +
+  geom_text_repel(position=pos, data=subset(R2_int_spec, (log2FoldChange<0) & (R2_delta>0)), size=2.5) +
+  geom_text_repel(position=pos, data=subset(R2_int_spec, (log2FoldChange<(-5))), size=2.5) +
+  geom_text_repel(position=pos, data=subset(R2_int_spec, (log2FoldChange>7 & R2_delta>0.6)), size=2.5)
+  #theme_dark()
+dev.off()
+```
+
+```{r T1 Final Integration}
+png("T1_int_final.png", units="in", width=7, height=5, res=300)
+ggplot(T1_int_spec, aes(x=T1_delta, y=log2FoldChange, label=GeneID)) +
+  geom_point(position=pos, aes(col=CpG_Location), size=1.5, alpha=0.7) +
+  xlim(-1,1) +
+  ylim(-10.1,10.1) +
+  xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_jcolors(palette="pal4") +
+  geom_text_repel(position=pos, data = T1_int_spec, size=2.5) 
+ # theme_dark()
+dev.off()
+```
+
+```{r T2 Final Integration}
+png("T2_int_final.png", units="in", width=7, height=5, res=300)
+ggplot(T2_int_spec, aes(x=T2_delta, y=log2FoldChange, label=GeneID)) +
+  geom_point(position=pos, aes(col=CpG_Location), size=1.5, alpha=0.6) +
+  xlim(-1,1) +
+  ylim(-10.1,10.1) +
+  xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_jcolors(palette="pal4") +
+  geom_text_repel(position=pos, data=subset(T2_int_spec, log2FoldChange>5), size=2.5) +
+  geom_text_repel(position=pos, data=subset(T2_int_spec, log2FoldChange<(-5)), size=2.5) +
+  geom_text_repel(position=pos, data=subset(T2_int_spec, T2_delta>0.7), size=2.5)
+  #theme_dark()
+dev.off()
+```
+
+```{r}
+R1_int_spec$CpG_Location <- R1_int_spec$cgPos
+R2_int_spec$CpG_Location <- R2_int_spec$cgPos
+T1_int_spec$CpG_Location <- T1_int_spec$cgPos
+T2_int_spec$CpG_Location <- T2_int_spec$cgPos
+
+# replace values greater than 10 with 10 or less than 10 with -10
+R1_int_spec$log2FoldChange[R1_int_spec$log2FoldChange>10] <- 10
+R1_int_spec$log2FoldChange[R1_int_spec$log2FoldChange<(-10)] <- -10
+R2_int_spec$log2FoldChange[R2_int_spec$log2FoldChange>10] <- 10
+R2_int_spec$log2FoldChange[R2_int_spec$log2FoldChange<(-10)] <- -10
+T1_int_spec$log2FoldChange[T1_int_spec$log2FoldChange>10] <- 10
+T1_int_spec$log2FoldChange[T1_int_spec$log2FoldChange<(-10)] <- -10
+T2_int_spec$log2FoldChange[T2_int_spec$log2FoldChange>10] <- 10
+T2_int_spec$log2FoldChange[T2_int_spec$log2FoldChange<(-10)] <- -10
+```
+
+```{r}
+ggplot(subset(T2_int_spec, CpG_Location=="3'UTR"), aes(x=T2_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=CpG_Location), width=0.2, size=2, alpha=0.8) +
+  xlim(-1,1) +
+  ylim(-10.1,10.1) +
+  ggtitle("T2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_jcolors(palette="pal9")
+ggplot(subset(T2_int_spec, CpG_Location=="5'UTR"), aes(x=T2_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=CpG_Location), width=0.2, size=2, alpha=0.8) +
+  xlim(-1,1) +
+  ylim(-10.1,10.1) +
+  ggtitle("T2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_jcolors(palette="pal9")
+ggplot(subset(T2_int_spec, CpG_Location=="Body"), aes(x=T2_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=CpG_Location), width=0.2, size=2, alpha=0.8) +
+  xlim(-1,1) +
+  ylim(-10.1,10.1) +
+  ggtitle("T2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_jcolors(palette="pal9")
+ggplot(subset(T2_int_spec, CpG_Location=="1stExon"), aes(x=T2_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=CpG_Location), width=0.2, size=2, alpha=0.8) +
+  xlim(-1,1) +
+  ylim(-10.1,10.1) +
+  ggtitle("T2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_jcolors(palette="pal9")
+ggplot(subset(T2_int_spec, CpG_Location=="TSS1500"), aes(x=T2_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=CpG_Location), width=0.2, size=2, alpha=0.8) +
+  xlim(-1,1) +
+  ylim(-10.1,10.1) +
+  ggtitle("T2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_jcolors(palette="pal9")
+ggplot(subset(T2_int_spec, CpG_Location=="TSS200"), aes(x=T2_delta, y=log2FoldChange, label=GeneID)) +
+  geom_jitter(aes(col=CpG_Location), width=0.2, size=2, alpha=0.8) +
+  xlim(-1,1) +
+  ylim(-10.1,10.1) +
+  ggtitle("T2") + xlab("Delta Value") + ylab("Log2FC") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  scale_color_jcolors(palette="pal9")
+```
+
+```{r}
+#Q1
+subset(T1_int_spec, log2FoldChange>0 & T1_delta>0)
+#Q2
+subset(T1_int_spec, log2FoldChange>0 & T1_delta<0)
+#Q3
+subset(T1_int_spec, log2FoldChange<0 & T1_delta<0)
+#Q4
+subset(T1_int_spec, log2FoldChange<0 & T1_delta>0)
+```
+

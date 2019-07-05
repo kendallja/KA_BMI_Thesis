@@ -1,0 +1,756 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r Load Packages}
+library(limma)
+library(minfi)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(IlluminaHumanMethylation450kmanifest)
+library(RColorBrewer)
+library(missMethyl)
+library(matrixStats)
+library(minfiData)
+library(Gviz)
+library(DMRcate)
+library(stringr)
+library(sva)
+```
+
+### Import Data and Annotations ###
+
+```{r}
+ann450k = getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+
+dataDirectory <- "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/iDaT_files"
+
+targets <- read.metharray.sheet(dataDirectory, pattern="SampleSheet.csv")
+targets
+
+# create methyl array object
+rgSet <- read.metharray.exp(targets=targets)
+rgSet
+# assign the samples names to the rgSet
+sampleNames(rgSet) <- targets$Sample_Name
+rgSet
+```
+
+### Quality Control ###
+
+```{r Quality Control}
+# calculate detection pvalues based on control probed in 450k array
+detP <- detectionP(rgSet)
+head(detP)
+
+# plot p-values
+pal <- brewer.pal(8,"Dark2")
+par(mfrow=c(1,2))
+barplot(colMeans(detP), col=pal[factor(targets$Cell_status)], las=2,
+ cex.names=0.6,ylab="Mean detection p-values")
+abline(h=0.01,col="red")
+legend("topleft", legend=levels(factor(targets$Cell_status)), fill=pal,
+ bg="white")
+barplot(colMeans(detP), col=pal[factor(targets$Cell_status)], las=2,
+ cex.names=0.6, ylim = c(0,0.002), ylab="Mean detection p-values")
+legend("topleft", legend=levels(factor(targets$Cell_status)), fill=pal,
+ bg="white")
+```
+*No low quality samples so no need to throw any out.*
+
+### Normalization ###
+
+```{r Normalization}
+library(harrypotter)
+pal <- hp(n = 4, house = "Gryffindor")
+
+# test SWAN and quantile normalization
+mSetSWAN <- preprocessSWAN(rgSet)
+mSetQuan <- preprocessQuantile(rgSet)
+# raw dataset, has to be converted into same object type
+mSetRaw <- preprocessRaw(rgSet)
+
+mSetNorm <- preprocessFunnorm(rgSet)
+
+# plot swan normalization vs raw
+par(mfrow=c(1,2))
+densityPlot(rgSet, sampGroups=targets$Resistance_status,main="Raw", legend=FALSE)
+legend("top", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+densityPlot(getBeta(mSetSWAN), sampGroups=targets$Resistance_status,
+ main="SWAN Normalized", legend=FALSE)
+legend("top", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+
+# plot quantile normalization vs raw
+tiff("Meth_Normalization.tiff", units="in", width=7, height=5, res=300)
+par(mfrow=c(1,2))
+densityPlot(rgSet, sampGroups=targets$Status,main="Raw", legend=FALSE, pal=hp(n=4, option="lunalovegood"))
+legend("top", legend = levels(factor(targets$Status)),
+ text.col=hp(n=4, option="lunalovegood"))
+densityPlot(getBeta(mSetQuan), sampGroups=targets$Status,
+ main="Quantile Normalized", legend=FALSE, pal=hp(n=4, option="lunalovegood"))
+legend("top", legend = levels(factor(targets$Status)),
+ text.col=hp(n=4, option="lunalovegood"))
+dev.off()
+
+# plot funnorm normalization vs raw
+par(mfrow=c(1,2))
+densityPlot(rgSet, sampGroups=targets$Status,main="Raw", legend=FALSE, pal=hp(n=4, option="lunalovegood"))
+legend("top", legend = levels(factor(targets$Status)),
+ text.col=hp(n=4, option="lunalovegood"))
+densityPlot(getBeta(mSetNorm), sampGroups=targets$Status,
+ main="Quan Normalized", legend=FALSE, pal=hp(n=4, option="lunalovegood"))
+legend("top", legend = levels(factor(targets$Status)),
+ text.col=hp(n=4, option="lunalovegood"))
+```
+*Quantile normalization seems to yield better results.*
+
+### Data Filtering ###
+
+```{r Filter Probes}
+mSetQuanFlt <- dropLociWithSnps(mSetQuan)
+mSetQuanFlt
+```
+
+### Batch Correction ###
+
+```{r Test Different Batch Correction Options}
+# perform different options on beta
+cell_batch_corr_beta <- ComBat(getBeta(mSetQuanFlt), batch=targets$Sample_Group, mod = model.matrix(~as.factor(Cell_status), data=targets))
+
+res_batch_corr_beta <- ComBat(getBeta(mSetQuanFlt), batch=targets$Sample_Group, mod = model.matrix(~as.factor(Resistance_status), data=targets))
+
+treat_batch_corr_beta <- ComBat(getBeta(mSetQuanFlt), batch=targets$Sample_Group, mod = model.matrix(~as.factor(Treatment_status), data=targets))
+
+unsup_batch_corr_beta <- ComBat(getBeta(mSetQuanFlt), batch=targets$Sample_Group)
+
+# perform different options on M
+cell_batch_corr_M <- ComBat(getM(mSetQuanFlt), batch=targets$Sample_Group, mod = model.matrix(~as.factor(Cell_status), data=targets))
+
+res_batch_corr_M <- ComBat(getM(mSetQuanFlt), batch=targets$Sample_Group, mod = model.matrix(~as.factor(Resistance_status), data=targets))
+
+treat_batch_corr_M <- ComBat(getM(mSetQuanFlt), batch=targets$Sample_Group, mod = model.matrix(~as.factor(Treatment_status), data=targets))
+
+unsup_batch_corr_M <- ComBat(getM(mSetQuanFlt), batch=targets$Sample_Group)
+```
+
+```{r Plot M Batch Correction Comparisons}
+par(mfrow=c(1,2))
+densityPlot(getM(mSetQuanFlt), sampGroups=targets$Resistance_status,
+ main="Quan Normalized M", legend=FALSE)
+legend("bottom", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+densityPlot(cell_batch_corr_M, sampGroups=targets$Resistance_status,
+ main="Batch Corrected- Cell M", legend=FALSE)
+legend("bottom", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+
+par(mfrow=c(1,2))
+densityPlot(getM(mSetQuanFlt), sampGroups=targets$Resistance_status,
+ main="Quan Normalized M", legend=FALSE)
+legend("bottom", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+densityPlot(res_batch_corr_M, sampGroups=targets$Resistance_status,
+ main="Batch Corrected- Res M", legend=FALSE)
+legend("bottom", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+
+par(mfrow=c(1,2))
+densityPlot(getM(mSetQuanFlt), sampGroups=targets$Resistance_status,
+ main="Quan Normalized M", legend=FALSE)
+legend("bottom", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+densityPlot(treat_batch_corr_M, sampGroups=targets$Resistance_status,
+ main="Batch Corrected- Treat M", legend=FALSE)
+legend("bottom", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+
+par(mfrow=c(1,2))
+densityPlot(getM(mSetQuanFlt), sampGroups=targets$Resistance_status,
+ main="Quan Normalized M", legend=FALSE)
+legend("bottom", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+densityPlot(unsup_batch_corr_M, sampGroups=targets$Resistance_status,
+ main="Batch Corrected- Unsup M", legend=FALSE)
+legend("bottom", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+```
+
+```{r Plot Beta Batch Correction Comparison}
+par(mfrow=c(1,2))
+densityPlot(getBeta(mSetQuanFlt), sampGroups=targets$Resistance_status,
+ main="Quan Normalized", legend=FALSE)
+legend("top", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+densityPlot(cell_batch_corr, sampGroups=targets$Resistance_status,
+ main="Batch Corrected- Cell", legend=FALSE)
+legend("top", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+
+par(mfrow=c(1,2))
+densityPlot(getBeta(mSetQuanFlt), sampGroups=targets$Resistance_status,
+ main="Quan Normalized", legend=FALSE)
+legend("top", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+densityPlot(res_batch_corr, sampGroups=targets$Resistance_status,
+ main="Batch Corrected- Res", legend=FALSE)
+legend("top", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+
+par(mfrow=c(1,2))
+densityPlot(getBeta(mSetQuanFlt), sampGroups=targets$Resistance_status,
+ main="Quan Normalized", legend=FALSE)
+legend("top", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+densityPlot(treat_batch_corr, sampGroups=targets$Resistance_status,
+ main="Batch Corrected- Treat", legend=FALSE)
+legend("top", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+
+tiff("Meth_Batch_Correction.tiff", units="in", width=7, height=5, res=300)
+par(mfrow=c(1,2))
+densityPlot(getBeta(mSetQuanFlt), sampGroups=targets$Status,
+ main="Normalized Pre-Correction", legend=FALSE, pal=hp(n=4, option="lunalovegood"))
+legend("top", legend = levels(factor(targets$Status)),
+ text.col=hp(n=4, option="lunalovegood"))
+densityPlot(unsup_batch_corr, sampGroups=targets$Status,
+ main="Normalized Batch Corrected", legend=FALSE, pal=hp(n=4, option="lunalovegood"))
+legend("top", legend = levels(factor(targets$Status)),
+ text.col=hp(n=4, option="lunalovegood"))
+dev.off()
+```
+*Decided to go with the unsupervised batch correction.*
+
+```{r Plot all three (raw, norm, batch corr)}
+png("Meth_Batch_Correction.png", units="in", width=10, height=5, res=300)
+par(mfrow=c(1,3))
+densityPlot(rgSet, sampGroups=targets$Status,main="Raw", legend=FALSE, pal=hp(n=4, option="lunalovegood"))
+legend("top", legend = levels(factor(targets$Status)),
+ text.col=hp(n=4, option="lunalovegood"))
+densityPlot(getBeta(mSetQuanFlt), sampGroups=targets$Status,
+ main="Normalized Pre-Correction", legend=FALSE, pal=hp(n=4, option="lunalovegood"))
+legend("top", legend = levels(factor(targets$Status)),
+ text.col=hp(n=4, option="lunalovegood"))
+densityPlot(unsup_batch_corr, sampGroups=targets$Status,
+ main="Normalized Batch Corrected", legend=FALSE, pal=hp(n=4, option="lunalovegood"))
+legend("top", legend = levels(factor(targets$Status)),
+ text.col=hp(n=4, option="lunalovegood"))
+dev.off()
+```
+
+### MDS Plots ###
+
+```{r MDS Plot Before Batch Correction}
+par(mfrow=c(1,3))
+plotMDS(getM(mSetQuanFlt), top=1000, gene.selection="common",
+ col=pal[factor(targets$Cell_status)])
+legend("top", legend=levels(factor(targets$Cell_status)), text.col=pal,
+ bg="white", cex=0.7)
+plotMDS(getM(mSetQuanFlt), top=1000, gene.selection="common",
+ col=pal[factor(targets$Resistance_status)])
+legend("top", legend=levels(factor(targets$Resistance_status)), text.col=pal,
+ bg="white", cex=0.7)
+plotMDS(getM(mSetQuanFlt), top=1000, gene.selection="common",
+ col=pal[factor(targets$Resistance_status)])
+legend("top", legend=levels(factor(targets$Treatment_status)), text.col=pal,
+ bg="white", cex=0.7)
+```
+
+```{r MDS Plot After Batch Correction}
+par(mfrow=c(1,3))
+plotMDS(unsup_batch_corr_M, top=1000, gene.selection="common",
+ col=pal[factor(targets$Cell_status)])
+legend("top", legend=levels(factor(targets$Cell_status)), text.col=pal,
+ bg="white", cex=0.7)
+plotMDS(unsup_batch_corr_M, top=1000, gene.selection="common",
+ col=pal[factor(targets$Resistance_status)])
+legend("top", legend=levels(factor(targets$Resistance_status)), text.col=pal,
+ bg="white", cex=0.7)
+plotMDS(unsup_batch_corr_M, top=1000, gene.selection="common",
+ col=pal[factor(targets$Resistance_status)])
+legend("top", legend=levels(factor(targets$Treatment_status)), text.col=pal,
+ bg="white", cex=0.7)
+```
+
+```{r MDS Plot for Betas After Cell Batch Correction}
+par(mfrow=c(1,3))
+plotMDS(cell_batch_corr_beta, top=1000, gene.selection="common",
+ col=pal[factor(targets$Cell_status)])
+legend("top", legend=levels(factor(targets$Cell_status)), text.col=pal,
+ bg="white", cex=0.7)
+plotMDS(cell_batch_corr_beta, top=1000, gene.selection="common",
+ col=pal[factor(targets$Resistance_status)])
+legend("top", legend=levels(factor(targets$Resistance_status)), text.col=pal,
+ bg="white", cex=0.7)
+plotMDS(cell_batch_corr_beta, top=1000, gene.selection="common",
+ col=pal[factor(targets$Resistance_status)])
+legend("top", legend=levels(factor(targets$Treatment_status)), text.col=pal,
+ bg="white", cex=0.7)
+```
+
+```{r}
+deltas <- data.frame("R1"=(unsup_batch_corr_beta[,2])-(unsup_batch_corr_beta[,1]),
+                     "R2"=(unsup_batch_corr_beta[,6])-(unsup_batch_corr_beta[,5]),
+                     "R3"=(unsup_batch_corr_beta[,3])-(unsup_batch_corr_beta[,8]),
+                     "R4"=(unsup_batch_corr_beta[,7])-(unsup_batch_corr_beta[,4]),
+                     "T1"=(unsup_batch_corr_beta[,8])-(unsup_batch_corr_beta[,1]),
+                     "T2"=(unsup_batch_corr_beta[,4])-(unsup_batch_corr_beta[,5]),
+                     "T3"=(unsup_batch_corr_beta[,3])-(unsup_batch_corr_beta[,2]),
+                     "T4"=(unsup_batch_corr_beta[,7])-(unsup_batch_corr_beta[,6]))
+
+avg_deltas <- data.frame("R1_avg"=mean(deltas[,1]),
+                         "R2_avg"=mean(deltas[,2]),
+                         "R3_avg"=mean(deltas[,3]),
+                         "R4_avg"=mean(deltas[,4]),
+                         "T1_avg"=mean(deltas[,5]),
+                         "T2_avg"=mean(deltas[,6]),
+                         "T3_avg"=mean(deltas[,7]),
+                         "T4_avg"=mean(deltas[,8]))
+# annotate all betas
+betas_annotated <- as.data.frame(cbind2(ann450k[match(rownames(deltas),ann450k$Name),c(1:4,24,26)],deltas))
+
+```
+
+```{r Gene Lists for Sig Deltas- Resistance Comparisons}
+# select for sig deltas for R1
+R1_deltas_filt <- subset(deltas, abs(R1)>0.3, select="R1")
+# annotate with gene names
+R1_sig_genes <- as.data.frame(cbind2(ann450k[match(rownames(R1_deltas_filt),ann450k$Name),c(1:4,24,26)],R1_deltas_filt))
+# remove any position that does not have an associated gene
+R1_sig_genes <- subset(R1_sig_genes, UCSC_RefGene_Name!="")
+# change UCSC annotations to character strings
+R1_sig_genes$UCSC_RefGene_Group <- as.character(R1_sig_genes$UCSC_RefGene_Group)
+R1_sig_genes$UCSC_RefGene_Name <- as.character(R1_sig_genes$UCSC_RefGene_Name)
+# split gene lists and position lists
+R1_name <- strsplit(R1_sig_genes$UCSC_RefGene_Name, split=";")
+R1_group <- strsplit(R1_sig_genes$UCSC_RefGene_Group, split=";")
+# create data frame with gene and pos matching deltas
+R1_sig_genes <- data.frame(R1_delta = rep(R1_sig_genes$R1, sapply(R1_name, length)), 
+                           GeneID = unlist(R1_name), 
+                           cgPos = unlist(R1_group),
+                           chr = rep(R1_sig_genes$chr, sapply(R1_name, length)),
+                           pos = rep(R1_sig_genes$pos, sapply(R1_name, length)),
+                           strand = rep(R1_sig_genes$strand, sapply(R1_name, length)))
+# remove duplicates
+R1_sig_genes <- unique(R1_sig_genes)
+# write out file
+#write.csv(R1_sig_genes, file = "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R1_sig_genes.csv")
+
+# select for sig deltas for R2
+R2_deltas_filt <- subset(deltas, abs(R2)>0.3, select="R2")
+# annotate with gene names
+R2_sig_genes <- as.data.frame(cbind2(ann450k[match(rownames(R2_deltas_filt),ann450k$Name),c(1:4,24,26)],R2_deltas_filt))
+# remove any position that does not have an associated gene
+R2_sig_genes <- subset(R2_sig_genes, UCSC_RefGene_Name!="")
+# change UCSC annotations to character strings
+R2_sig_genes$UCSC_RefGene_Group <- as.character(R2_sig_genes$UCSC_RefGene_Group)
+R2_sig_genes$UCSC_RefGene_Name <- as.character(R2_sig_genes$UCSC_RefGene_Name)
+# split gene lists and position lists
+R2_name <- strsplit(R2_sig_genes$UCSC_RefGene_Name, split=";")
+R2_group <- strsplit(R2_sig_genes$UCSC_RefGene_Group, split=";")
+# create data frame with gene and pos matching deltas
+R2_sig_genes <- data.frame(R2_delta = rep(R2_sig_genes$R2, sapply(R2_name, length)), 
+                           GeneID = unlist(R2_name), 
+                           cgPos = unlist(R2_group),
+                           chr = rep(R2_sig_genes$chr, sapply(R2_name, length)),
+                           pos = rep(R2_sig_genes$pos, sapply(R2_name, length)),
+                           strand = rep(R2_sig_genes$strand, sapply(R2_name, length)))
+# remove duplicates
+R2_sig_genes <- unique(R2_sig_genes)
+# write out file
+#write.csv(R2_sig_genes, file = "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R2_sig_genes.csv")
+
+# select for sig deltas for R3
+R3_deltas_filt <- subset(deltas, abs(R3)>0.3, select="R3")
+# annotate with gene names
+R3_sig_genes <- as.data.frame(cbind2(ann450k[match(rownames(R3_deltas_filt),ann450k$Name),c(1:4,24,26)],R3_deltas_filt))
+# remove any position that does not have an associated gene
+R3_sig_genes <- subset(R3_sig_genes, UCSC_RefGene_Name!="")
+# change UCSC annotations to character strings
+R3_sig_genes$UCSC_RefGene_Group <- as.character(R3_sig_genes$UCSC_RefGene_Group)
+R3_sig_genes$UCSC_RefGene_Name <- as.character(R3_sig_genes$UCSC_RefGene_Name)
+# split gene lists and position lists
+R3_name <- strsplit(R3_sig_genes$UCSC_RefGene_Name, split=";")
+R3_group <- strsplit(R3_sig_genes$UCSC_RefGene_Group, split=";")
+# create data frame with gene and pos matching deltas
+R3_sig_genes <- data.frame(R3_delta = rep(R3_sig_genes$R3, sapply(R3_name, length)), 
+                           GeneID = unlist(R3_name), 
+                           cgPos = unlist(R3_group),
+                           chr = rep(R3_sig_genes$chr, sapply(R3_name, length)),
+                           pos = rep(R3_sig_genes$pos, sapply(R3_name, length)),
+                           strand = rep(R3_sig_genes$strand, sapply(R3_name, length)))
+# remove duplicates
+R3_sig_genes <- unique(R3_sig_genes)
+# write out file
+#write.csv(R3_sig_genes, file = "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R3_sig_genes.csv")
+
+# select for sig deltas for R4
+R4_deltas_filt <- subset(deltas, abs(R4)>0.3, select="R4")
+# annotate with gene names
+R4_sig_genes <- as.data.frame(cbind2(ann450k[match(rownames(R4_deltas_filt),ann450k$Name),c(1:4,24,26)],R4_deltas_filt))
+# remove any position that does not have an associated gene
+R4_sig_genes <- subset(R4_sig_genes, UCSC_RefGene_Name!="")
+# change UCSC annotations to character strings
+R4_sig_genes$UCSC_RefGene_Group <- as.character(R4_sig_genes$UCSC_RefGene_Group)
+R4_sig_genes$UCSC_RefGene_Name <- as.character(R4_sig_genes$UCSC_RefGene_Name)
+# split gene lists and position lists
+R4_name <- strsplit(R4_sig_genes$UCSC_RefGene_Name, split=";")
+R4_group <- strsplit(R4_sig_genes$UCSC_RefGene_Group, split=";")
+# create data frame with gene and pos matching deltas
+R4_sig_genes <- data.frame(R4_delta = rep(R4_sig_genes$R4, sapply(R4_name, length)), 
+                           GeneID = unlist(R4_name), 
+                           cgPos = unlist(R4_group),
+                           chr = rep(R4_sig_genes$chr, sapply(R4_name, length)),
+                           pos = rep(R4_sig_genes$pos, sapply(R4_name, length)),
+                           strand = rep(R4_sig_genes$strand, sapply(R4_name, length)))
+# remove duplicates
+R4_sig_genes <- unique(R4_sig_genes)
+# write out file
+#write.csv(R4_sig_genes, file = "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R4_sig_genes.csv")
+```
+
+```{r Gene Lists for Sig Deltas- Treatment Comparisons}
+# select for sig deltas for T1
+T1_deltas_filt <- subset(deltas, abs(T1)>0.3, select="T1")
+# annotate with gene names
+T1_sig_genes <- as.data.frame(cbind2(ann450k[match(rownames(T1_deltas_filt),ann450k$Name),c(1:4,24,26)],T1_deltas_filt))
+# remove any position that does not have an associated gene
+T1_sig_genes <- subset(T1_sig_genes, UCSC_RefGene_Name!="")
+# change UCSC annotations to character strings
+T1_sig_genes$UCSC_RefGene_Group <- as.character(T1_sig_genes$UCSC_RefGene_Group)
+T1_sig_genes$UCSC_RefGene_Name <- as.character(T1_sig_genes$UCSC_RefGene_Name)
+# split gene lists and position lists
+T1_name <- strsplit(T1_sig_genes$UCSC_RefGene_Name, split=";")
+T1_group <- strsplit(T1_sig_genes$UCSC_RefGene_Group, split=";")
+# create data frame with gene and pos matching deltas
+T1_sig_genes <- data.frame(T1_delta = rep(T1_sig_genes$T1, sapply(T1_name, length)), 
+                           GeneID = unlist(T1_name), 
+                           cgPos = unlist(T1_group),
+                           chr = rep(T1_sig_genes$chr, sapply(T1_name, length)),
+                           pos = rep(T1_sig_genes$pos, sapply(T1_name, length)),
+                           strand = rep(T1_sig_genes$strand, sapply(T1_name, length)))
+# remove duplicates
+T1_sig_genes <- unique(T1_sig_genes)
+# write out file
+#write.csv(T1_sig_genes, file = "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T1_sig_genes.csv")
+
+# select for sig deltas for T2
+T2_deltas_filt <- subset(deltas, abs(T2)>0.3, select="T2")
+# annotate with gene names
+T2_sig_genes <- as.data.frame(cbind2(ann450k[match(rownames(T2_deltas_filt),ann450k$Name),c(1:4,24,26)],T2_deltas_filt))
+# remove any position that does not have an associated gene
+T2_sig_genes <- subset(T2_sig_genes, UCSC_RefGene_Name!="")
+# change UCSC annotations to character strings
+T2_sig_genes$UCSC_RefGene_Group <- as.character(T2_sig_genes$UCSC_RefGene_Group)
+T2_sig_genes$UCSC_RefGene_Name <- as.character(T2_sig_genes$UCSC_RefGene_Name)
+# split gene lists and position lists
+T2_name <- strsplit(T2_sig_genes$UCSC_RefGene_Name, split=";")
+T2_group <- strsplit(T2_sig_genes$UCSC_RefGene_Group, split=";")
+# create data frame with gene and pos matching deltas
+T2_sig_genes <- data.frame(T2_delta = rep(T2_sig_genes$T2, sapply(T2_name, length)), 
+                           GeneID = unlist(T2_name), 
+                           cgPos = unlist(T2_group),
+                           chr = rep(T2_sig_genes$chr, sapply(T2_name, length)),
+                           pos = rep(T2_sig_genes$pos, sapply(T2_name, length)),
+                           strand = rep(T2_sig_genes$strand, sapply(T2_name, length)))
+# remove duplicates
+T2_sig_genes <- unique(T2_sig_genes)
+# write out file
+#write.csv(T2_sig_genes, file = "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T2_sig_genes.csv")
+
+# select for sig deltas for T3
+T3_deltas_filt <- subset(deltas, abs(T3)>0.3, select="T3")
+# annotate with gene names
+T3_sig_genes <- as.data.frame(cbind2(ann450k[match(rownames(T3_deltas_filt),ann450k$Name),c(1:4,24,26)],T3_deltas_filt))
+# remove any position that does not have an associated gene
+T3_sig_genes <- subset(T3_sig_genes, UCSC_RefGene_Name!="")
+# change UCSC annotations to character strings
+T3_sig_genes$UCSC_RefGene_Group <- as.character(T3_sig_genes$UCSC_RefGene_Group)
+T3_sig_genes$UCSC_RefGene_Name <- as.character(T3_sig_genes$UCSC_RefGene_Name)
+# split gene lists and position lists
+T3_name <- strsplit(T3_sig_genes$UCSC_RefGene_Name, split=";")
+T3_group <- strsplit(T3_sig_genes$UCSC_RefGene_Group, split=";")
+# create data frame with gene and pos matching deltas
+T3_sig_genes <- data.frame(T3_delta = rep(T3_sig_genes$T3, sapply(T3_name, length)), 
+                           GeneID = unlist(T3_name), 
+                           cgPos = unlist(T3_group),
+                           chr = rep(T3_sig_genes$chr, sapply(T3_name, length)),
+                           pos = rep(T3_sig_genes$pos, sapply(T3_name, length)),
+                           strand = rep(T3_sig_genes$strand, sapply(T3_name, length)))
+# remove duplicates
+T3_sig_genes <- unique(T3_sig_genes)
+# write out file
+#write.csv(T3_sig_genes, file = "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T3_sig_genes.csv")
+
+# select for sig deltas for T4
+T4_deltas_filt <- subset(deltas, abs(T4)>0.3, select="T4")
+# annotate with gene names
+T4_sig_genes <- as.data.frame(cbind2(ann450k[match(rownames(T4_deltas_filt),ann450k$Name),c(1:4,24,26)],T4_deltas_filt))
+# remove any position that does not have an associated gene
+T4_sig_genes <- subset(T4_sig_genes, UCSC_RefGene_Name!="")
+# change UCSC annotations to character strings
+T4_sig_genes$UCSC_RefGene_Group <- as.character(T4_sig_genes$UCSC_RefGene_Group)
+T4_sig_genes$UCSC_RefGene_Name <- as.character(T4_sig_genes$UCSC_RefGene_Name)
+# split gene lists and position lists
+T4_name <- strsplit(T4_sig_genes$UCSC_RefGene_Name, split=";")
+T4_group <- strsplit(T4_sig_genes$UCSC_RefGene_Group, split=";")
+# create data frame with gene and pos matching deltas
+T4_sig_genes <- data.frame(T4_delta = rep(T4_sig_genes$T4, sapply(T4_name, length)), 
+                           GeneID = unlist(T4_name), 
+                           cgPos = unlist(T4_group),
+                           chr = rep(T4_sig_genes$chr, sapply(T4_name, length)),
+                           pos = rep(T4_sig_genes$pos, sapply(T4_name, length)),
+                           strand = rep(T4_sig_genes$strand, sapply(T4_name, length)))
+# remove duplicates
+T4_sig_genes <- unique(T4_sig_genes)
+# write out file
+#write.csv(T4_sig_genes, file = "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T4_sig_genes.csv")
+```
+
+```{r Write out unique gene lists}
+R1_genes <- unique(R1_sig_genes$GeneID)
+R2_genes <- unique(R2_sig_genes$GeneID)
+R3_genes <- unique(R3_sig_genes$GeneID)
+R4_genes <- unique(R4_sig_genes$GeneID)
+T1_genes <- unique(T1_sig_genes$GeneID)
+T2_genes <- unique(T2_sig_genes$GeneID)
+T3_genes <- unique(T3_sig_genes$GeneID)
+T4_genes <- unique(T4_sig_genes$GeneID)
+
+#write.csv(R1_genes, file="/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R1_gene_list.csv")
+#write.csv(R2_genes, file="/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R2_gene_list.csv")
+#write.csv(R3_genes, file="/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R3_gene_list.csv")
+#write.csv(R4_genes, file="/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/R4_gene_list.csv")
+#write.csv(T1_genes, file="/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T1_gene_list.csv")
+#write.csv(T2_genes, file="/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T2_gene_list.csv")
+#write.csv(T3_genes, file="/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T3_gene_list.csv")
+#write.csv(T4_genes, file="/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/T4_gene_list.csv")
+```
+
+
+```{r}
+nrow(R1_sig_genes)
+length(R1_genes)
+
+nrow(subset(T4_sig_genes, T4_delta>0))
+nrow(subset(T4_sig_genes, T4_delta<0))
+```
+
+```{r Histograms of Delta Distributions}
+hist(deltas$R1, breaks=50, xlim=c(-1,1), main="Differential Betas in Resistant Cells", xlab="Delta Values", ylim=c(0,180000))
+hist(deltas$R2, breaks=50, xlim=c(-1,1), main="Differential Betas in Resistant Cells", xlab="Delta Values", ylim=c(0,180000))
+
+hist(deltas$R3, breaks=50, xlim=c(-1,1))
+hist(deltas$R4, breaks=50, xlim=c(-1,1))
+
+hist(deltas$T1, breaks=50, xlim=c(-1,1), main="Differential Beta Values in Treated Cells", xlab="Delta Values", ylim=c(0,180000))
+hist(deltas$T2, breaks=50, xlim=c(-1,1), main="Differential Beta Values in Treated Cells", xlab="Delta Values", ylim=c(0,180000))
+hist(deltas$T3, breaks=50, xlim=c(-1,1), main="Differential Beta Values in Treated Resistant Cells", xlab="Delta Values", ylim=c(0,180000))
+hist(deltas$T4, breaks=50, xlim=c(-1,1), main="Differential Betas in Treated Resistant Cells", xlab="Delta Values", ylim=c(0,180000))
+```
+
+```{r Overlapping histograms of delta values}
+# make dataframe to generate overlapping histograms
+deltas_one <- data.frame("Delta"=c(deltas$R1,deltas$R2,deltas$R3,deltas$R4,deltas$T1,deltas$T2,deltas$T3,deltas$T4),"Comparison"=c(rep("R1",nrow(deltas)),rep("R2",nrow(deltas)),rep("R3",nrow(deltas)),rep("R4",nrow(deltas)),rep("T1",nrow(deltas)),rep("T2",nrow(deltas)),rep("T3",nrow(deltas)),rep("T4",nrow(deltas))))
+
+png("Meth_R1R2_hist.png", units="in", width=7, height=5, res=300)
+# plot deltas for parental vs resistant
+ggplot(deltas_one,aes(x=Delta)) + 
+    geom_histogram(data=subset(deltas_one,Comparison == 'R1'),fill = "#8fb9ba", alpha = 0.6, binwidth = 0.01) +
+    geom_histogram(data=subset(deltas_one,Comparison == 'R2'),fill = "#9a8fba", alpha = 0.6, binwidth = 0.01) +
+  xlim(c(-0.75,0.75)) +
+  #labs(title="Changes in Methylation Upon Gaining Resistance") + 
+  ylab("Frequency") + xlab("Delta Values") + geom_vline(xintercept=c(-0.3,0.3), linetype="dotted")
+dev.off()
+
+png("Meth_T1T2_hist.png", units="in", width=7, height=5, res=300)
+# plot deltas for untreated vs treated
+ggplot(deltas_one,aes(x=Delta)) + 
+    geom_histogram(data=subset(deltas_one,Comparison == 'T1'),fill = "#8fb9ba", alpha = 0.6, binwidth = 0.01) +
+    geom_histogram(data=subset(deltas_one,Comparison == 'T2'),fill = "#9a8fba", alpha = 0.6, binwidth = 0.01) +
+  xlim(c(-0.75,0.75)) + 
+  #labs(title="Distribution of Delta Values for Treated Cells") + 
+  ylab("Frequency") + xlab("Delta Values") +
+  geom_vline(xintercept=c(-0.3,0.3), linetype="dotted")
+dev.off()
+
+png("Meth_T3T4_hist.png", units="in", width=7, height=5, res=300)
+# plot deltas for untreated vs treated, resistant
+ggplot(deltas_one,aes(x=Delta)) + 
+    geom_histogram(data=subset(deltas_one,Comparison == 'T3'),fill = "#8fb9ba", alpha = 0.6, binwidth = 0.01) +
+    geom_histogram(data=subset(deltas_one,Comparison == 'T4'),fill = "#9a8fba", alpha = 0.6, binwidth = 0.01) +
+  xlim(c(-0.75,0.75)) +
+  #labs(title="Distribution of Delta Values for Treated Resistant Cells") + 
+  ylab("Frequency") + xlab("Delta Values") + geom_vline(xintercept=c(-0.3,0.3), linetype="dotted")
+dev.off()
+```
+
+```{r}
+nrow(subset(deltas, T4>0.3))
+nrow(subset(deltas, T4<(-0.3)))
+```
+
+```{r Annotating the Deltas}
+ann450kSub <- ann450k[match(rownames(deltas),ann450k$Name),
+ c(1:4,12:19,24:ncol(ann450k))]
+```
+
+```{r}
+densityBeanPlot(unsup_batch_corr_beta, sampGroups = targets$Cell_status)
+```
+
+```{r}
+par(mfrow=c(1,2))
+densityPlot(unsup_batch_corr_beta, sampGroups=targets$Resistance_status, main="Beta values",
+ legend=FALSE, xlab="Beta values")
+legend("top", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+densityPlot(unsup_batch_corr_M, sampGroups=targets$Resistance_status, main="M-values",
+ legend=FALSE, xlab="M values")
+legend("topleft", legend = levels(factor(targets$Resistance_status)),
+ text.col=brewer.pal(8,"Dark2"))
+```
+
+### Probe-Wise Differential Methylation Analysis ###
+
+## This is not working and I am very frustrated. ##
+```{r}
+# this is the factor of interest
+status <- factor(targets$Status)
+# this is the individual effect that we need to account for
+cell <- factor(targets$Cell_status)
+
+# use the above to create a design matrix
+design <- model.matrix(~0+status+cell, data=targets)
+colnames(design) <- c(levels(status),levels(cell)[-1])
+
+# fit the linear model
+fit <- lmFit(unsup_batch_corr_M, design)
+# create a contrast matrix for specific comparisons
+contMatrix <- makeContrasts(Par_UT-Res_UT,
+                            Par_T-Res_T,
+                            Par_UT-Par_T,
+                            Res_UT-Res_T,
+                            levels=design)
+contMatrix
+
+#fit2 <- contrasts.fit(fit, contMatrix)
+#fit2 <- eBayes(fit2)
+
+#summary(decideTests(fit2))
+cell
+```
+
+```{r}
+dmp <- dmpFinder(unsup_batch_corr_beta, pheno=targets$Status, type="categorical")
+dmp <- cbind(dmp, ID=rownames(dmp))
+dmp_annot_combined <- cbind(ann450k[row.names(dmp),],dmp)
+```
+
+
+```{r}
+View(dmp_annot_combined)
+```
+
+
+```{r Res1}
+dmp_res1 <- dmpFinder(unsup_batch_corr_beta[,1:2], pheno=targets$Status)
+dmp_res1 <- cbind(dmp_res1, ID=rownames(dmp_res1))
+dmp_res1_annot_combined <- cbind(ann450k[row.names(dmp_res1),],dmp_res1)
+```
+
+~~~
+
+### Annotate Genes of Interest from RNA HEL Overlaps ###
+
+```{r}
+View(HEL_deltas)
+# subset HEL and overlaps of interest
+HEL_deltas <- deltas[,c(2,6,8)]
+# annotate with gene names
+HEL_deltas <- as.data.frame(cbind2(ann450k[match(rownames(HEL_deltas),ann450k$Name),c(1:4,24,26)],HEL_deltas))
+# remove any position that does not have an associated gene
+HEL_deltas <- subset(HEL_deltas, UCSC_RefGene_Name!="")
+# change UCSC annotations to character strings
+HEL_deltas$UCSC_RefGene_Group <- as.character(HEL_deltas$UCSC_RefGene_Group)
+HEL_deltas$UCSC_RefGene_Name <- as.character(HEL_deltas$UCSC_RefGene_Name)
+# split gene lists and position lists
+HEL_name <- strsplit(HEL_deltas$UCSC_RefGene_Name, split=";")
+HEL_group <- strsplit(HEL_deltas$UCSC_RefGene_Group, split=";")
+# create data frame with gene and pos matching deltas
+HEL_deltas_final <- data.frame(R2_delta = rep(HEL_deltas$R2, sapply(HEL_name, length)),
+                               T2_delta = rep(HEL_deltas$T2, sapply(HEL_name, length)),
+                               T4_delta = rep(HEL_deltas$T4, sapply(HEL_name, length)),
+                               GeneID = unlist(HEL_name), 
+                               cgPos = unlist(HEL_group),
+                               chr = rep(HEL_deltas$chr, sapply(HEL_name, length)),
+                               pos = rep(HEL_deltas$pos, sapply(HEL_name, length)),
+                               strand = rep(HEL_deltas$strand, sapply(HEL_name, length)))
+
+# remove duplicates
+HEL_deltas_final <- unique(HEL_deltas_final)
+
+# select for genes of interest
+HEL_deltas_four <- subset(HEL_deltas_final, GeneID=="ATF3" | GeneID=="DDIT4" | GeneID=="RMRP" | GeneID=="RPPH1")
+
+HEL_deltas_twelve <- subset(HEL_deltas_final, GeneID=="AGAP1" | GeneID=="AK4" | GeneID=="ASNS" | GeneID=="C5orf4" | GeneID=="CHAC1" | GeneID=="EGR3" | GeneID=="FAM83A" | GeneID=="GNG8" | GeneID=="HBZ" | GeneID=="INHA" | GeneID=="LOC100505633" | GeneID=="RPTOR")
+
+# write out file
+#write.csv(HEL_deltas_four, file = "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/HEL_deltas_four.csv")
+#write.csv(HEL_deltas_twelve, file = "/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/HEL_deltas_twelve.csv")
+```
+
+
+```{r}
+HEL_deltas_two_opp <- subset(HEL_deltas_final, GeneID=="BMPER" | GeneID=="CDH3")
+write.csv(HEL_deltas_two_opp, file="/Users/kendallanderson/Documents/HMA Project/MethylSeq/methylation/Gene_Lists/HEL_deltas_two_opp.csv")
+
+View(HEL_deltas_two_opp)
+```
+
+```{r Plot Methylation for BMPER and CDH3}
+# plot BMPER methylation
+ggplot(subset(HEL_deltas_two_opp, GeneID=="BMPER"), aes(x=T2_delta, y=T4_delta)) +
+  geom_point(aes(col=cgPos), size=2, alpha=0.7) +
+  xlim(-0.7,0.7) +
+  ylim(-0.7,0.7) +
+  ggtitle("HEL Treatment Comparison- BMPER") + xlab("Sensitive Delta") + ylab("Resistant Delta") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  geom_vline(xintercept=c(-0.3,0.3), linetype="dotted", alpha=0.5) +
+  geom_hline(yintercept=c(-0.3,0.3), linetype="dotted", alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="#202547",
+                             "3'UTR"="#53354A",
+                             "Body"="#BE3144",
+                             "TSS1500"="#FF7844",
+                             "TSS200"="#E3D26F"),
+                    name="Position") 
+
+# plot CDH3 methylation
+ggplot(subset(HEL_deltas_two_opp, GeneID=="CDH3"), aes(x=T2_delta, y=T4_delta)) +
+  geom_point(aes(col=cgPos), size=2, alpha=0.7) +
+  xlim(-0.7,0.7) +
+  ylim(-0.7,0.7) +
+  ggtitle("HEL Treatment Comparison- CDH3") + xlab("Sensitive Delta") + ylab("Resistant Delta") +
+  geom_hline(yintercept=0, alpha=0.5) +
+  geom_vline(xintercept=0, alpha=0.5) +
+  geom_vline(xintercept=c(-0.3,0.3), linetype="dotted", alpha=0.5) +
+  geom_hline(yintercept=c(-0.3,0.3), linetype="dotted", alpha=0.5) +
+  scale_color_manual(labels = c("1stExon", "3'UTR", "5'UTR", "Body", "TSS1500", "TSS200"),
+                    values=c("1stExon"="#202547",
+                             "3'UTR"="#53354A",
+                             "5'UTR"="#7A6C5D",
+                             "Body"="#BE3144",
+                             "TSS1500"="#FF7844",
+                             "TSS200"="#E3D26F"),
+                    name="Position") 
+
+```
+
+
+
+
+
+

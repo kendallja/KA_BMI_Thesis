@@ -1,0 +1,1145 @@
+---
+title: "single_comparisons"
+author: "Kendall Anderson"
+date: "3/7/2019"
+output: 
+  html_document:
+    keep_md: TRUE
+---
+
+```{r message=FALSE}
+library(DESeq)
+library(ggplot2)
+library(dplyr)
+library(calibrate)
+library(plyr)
+library(VennDiagram)
+library(heatmaps)
+library(matrixStats)
+library(ComplexHeatmap)
+library(circlize)
+library(ggrepel)
+```
+
+~~~
+
+### Data import and cleaning ###
+
+```{r Create Input Data}
+# Create counts matrix
+rna <- read.csv("rna_raw.csv", row.names = NULL)
+#View(rna)
+
+rna_matrix <- data.matrix(rna[,6:13])
+#View(rna_matrix)
+
+# Create metadata df
+metadata <- data.frame(colnames(rna_matrix))
+metadata$labels <- metadata$colnames.rna_matrix.
+metadata$treatment <- c("untreated","treated","untreated","treated","untreated","treated","untreated","treated")
+metadata$cell <- c("TF1","TF1","TF1","TF1","HEL","HEL","HEL","HEL")
+metadata$status <- c("parental","parental","resistant","resistant","parental","parental","resistant","resistant")
+metadata <- metadata[,2:5]
+metadata$combined <- c("parental_untreated","parental_treated","resistant_untreated","resistant_treated","parental_untreated","parental_treated","resistant_untreated","resistant_treated")
+#View(metadata)
+
+# Create count data set for each cell type
+condition <- factor(c("parental_untreated","parental_treated","resistant_untreated","resistant_treated"))
+cds_TF1 <- newCountDataSet(rna_matrix[,1:4], condition)
+cds_HEL <- newCountDataSet(rna_matrix[,5:8], condition)
+
+# create gene to id key
+key <- data.frame("GeneID"=rna$GeneID, "id"=1:nrow(rna))
+key$id <- as.character(key$id)
+```
+
+~~~
+
+### Differential expression analysis ###
+
+```{r Resistance Comparison}
+resist1_cds <- cds_TF1[,c("s_1A_GeneCount","s_3A_GeneCount")]
+resist1_cds <- estimateSizeFactors(resist1_cds)
+resist1_cds <- estimateDispersions(resist1_cds, method="blind",sharingMode="fit-only")
+resist1_res <- nbinomTest(resist1_cds, "parental_untreated", "resistant_untreated")
+
+resist2_cds <- cds_HEL[,c("s_5A_GeneCount","s_7A_GeneCount")]
+resist2_cds <- estimateSizeFactors(resist2_cds)
+resist2_cds <- estimateDispersions(resist2_cds, method="blind",sharingMode="fit-only")
+resist2_res <- nbinomTest(resist2_cds, "parental_untreated", "resistant_untreated")
+
+resist3_cds <- cds_TF1[,c("s_2A_GeneCount","s_4A_GeneCount")]
+resist3_cds <- estimateSizeFactors(resist3_cds)
+resist3_cds <- estimateDispersions(resist3_cds, method="blind",sharingMode="fit-only")
+resist3_res <- nbinomTest(resist3_cds, "parental_treated", "resistant_treated")
+
+resist4_cds <- cds_HEL[,c("s_6A_GeneCount","s_8A_GeneCount")]
+resist4_cds <- estimateSizeFactors(resist4_cds)
+resist4_cds <- estimateDispersions(resist4_cds, method="blind",sharingMode="fit-only")
+resist4_res <- nbinomTest(resist4_cds, "parental_treated", "resistant_treated")
+```
+
+~~~
+
+### Normalization for heatmap ###
+
+```{r Normalize all raw counts with z-score}
+TF1_rna_matrix <- data.frame("TF1_par_UT"=rna_matrix[,1],
+                              "TF1_par_T"=rna_matrix[,2], 
+                              "TF1_res_UT"=rna_matrix[,3], 
+                              "TF1_res_T"=rna_matrix[,4])
+
+HEL_rna_matrix <- data.frame( "HEL_par_UT"=rna_matrix[,5], 
+                              "HEL_par_T"=rna_matrix[,6], 
+                              "HEL_res_UT"=rna_matrix[,7], 
+                              "HEL_res_T"=rna_matrix[,8])
+
+# generate standard deviation for each row
+TF1_rna_matrix$sd <- apply(TF1_rna_matrix[,1:4],1,sd)
+HEL_rna_matrix$sd <- apply(HEL_rna_matrix[,1:4],1,sd)
+
+# find row means for each row
+TF1_rna_matrix$rowmean <- rowMeans(TF1_rna_matrix[,1:4])
+HEL_rna_matrix$rowmean <- rowMeans(HEL_rna_matrix[,1:4])
+
+# create function for finding log2 normalization
+TF1_log2_norm <- function(input) {
+  (log2(input+1))-(log2(TF1_rna_matrix$rowmean+1))
+}
+
+HEL_log2_norm <- function(input) {
+  (log2(input+1))-(log2(HEL_rna_matrix$rowmean+1))
+}
+
+# run log2 normalization function on each sample
+TF1_rna_matrix$TF1_par_UT_lognorm <- TF1_log2_norm(TF1_rna_matrix$TF1_par_UT)
+TF1_rna_matrix$TF1_par_T_lognorm <- TF1_log2_norm(TF1_rna_matrix$TF1_par_T)
+TF1_rna_matrix$TF1_res_UT_lognorm <- TF1_log2_norm(TF1_rna_matrix$TF1_res_UT)
+TF1_rna_matrix$TF1_res_T_lognorm <- TF1_log2_norm(TF1_rna_matrix$TF1_res_T)
+
+HEL_rna_matrix$HEL_par_UT_lognorm <- HEL_log2_norm(HEL_rna_matrix$HEL_par_UT)
+HEL_rna_matrix$HEL_par_T_lognorm <- HEL_log2_norm(HEL_rna_matrix$HEL_par_T)
+HEL_rna_matrix$HEL_res_UT_lognorm <- HEL_log2_norm(HEL_rna_matrix$HEL_res_UT)
+HEL_rna_matrix$HEL_res_T_lognorm <- HEL_log2_norm(HEL_rna_matrix$HEL_res_T)
+
+# create function for zscore normalization
+TF1_zscore <- function(input) {
+  ((input-TF1_rna_matrix$rowmean)/TF1_rna_matrix$sd)
+}
+
+HEL_zscore <- function(input) {
+  ((input-HEL_rna_matrix$rowmean)/HEL_rna_matrix$sd)
+}
+
+# run zscore normalization on each sample
+TF1_rna_matrix$TF1_par_UT_z <- TF1_zscore(TF1_rna_matrix$TF1_par_UT)
+TF1_rna_matrix$TF1_par_T_z <- TF1_zscore(TF1_rna_matrix$TF1_par_T)
+TF1_rna_matrix$TF1_res_UT_z <- TF1_zscore(TF1_rna_matrix$TF1_res_UT)
+TF1_rna_matrix$TF1_res_T_z <- TF1_zscore(TF1_rna_matrix$TF1_res_T)
+
+HEL_rna_matrix$HEL_par_UT_z <- HEL_zscore(HEL_rna_matrix$HEL_par_UT)
+HEL_rna_matrix$HEL_par_T_z <- HEL_zscore(HEL_rna_matrix$HEL_par_T)
+HEL_rna_matrix$HEL_res_UT_z <- HEL_zscore(HEL_rna_matrix$HEL_res_UT)
+HEL_rna_matrix$HEL_res_T_z <- HEL_zscore(HEL_rna_matrix$HEL_res_T)
+
+norm_rna_matrix <- data.frame(c(TF1_rna_matrix[,7:14],HEL_rna_matrix[,7:14]))
+norm_rna_matrix$id <- as.character(seq.int(nrow(rna_matrix)))
+norm_rna_matrix <- full_join(key, norm_rna_matrix, by="id")
+
+#View(norm_rna_matrix)
+```
+
+~~~
+
+### Finding significant genes ###
+
+```{r Write Gene Lists}
+resist1_fil = resist1_res %>% 
+  dplyr::select("id", "log2FoldChange", "padj") %>% 
+  filter(padj < 0.5 & abs(log2FoldChange) > 1) %>% 
+  arrange(padj) 
+resist1_unfil = resist1_res %>% 
+  dplyr::select("id", "log2FoldChange", "padj") %>% 
+  arrange(padj) %>% 
+  head(500)
+#write.csv(resist1_fil, "TF1_UT_p05_l2fc1.csv")
+#write.csv(resist1_unfil, "TF1_UT_top500.csv")
+```
+
+```{r Write Out Significant Gene Lists}
+# filter for significance
+resist1_fil = resist1_res %>% 
+  dplyr::select("id", "log2FoldChange", "pval") %>% 
+  filter(pval < 0.001 & abs(log2FoldChange) > 1) %>% 
+  arrange(pval) 
+
+resist2_fil = resist2_res %>% 
+  dplyr::select("id", "log2FoldChange", "pval") %>% 
+  filter(pval < 0.001 & abs(log2FoldChange) > 1) %>% 
+  arrange(pval)
+
+resist3_fil = resist3_res %>% 
+  dplyr::select("id", "log2FoldChange", "pval") %>% 
+  filter(pval < 0.001 & abs(log2FoldChange) > 1) %>% 
+  arrange(pval) 
+
+resist4_fil = resist4_res %>% 
+  dplyr::select("id", "log2FoldChange", "pval") %>% 
+  filter(pval < 0.001 & abs(log2FoldChange) > 1) %>% 
+  arrange(pval)
+
+# find overlap between cell lines for untreated resistance comparison
+over_1_2 <- rbind(resist1_fil,resist2_fil)
+over_1_2 <- data.frame("id"=over_1_2$id[duplicated(over_1_2$id)==TRUE])
+over_1_2 <- left_join(over_1_2,key,by="id")
+
+# find overlap between cell lines for treated resistance comparison
+over_3_4 <- rbind(resist3_fil,resist4_fil)
+over_3_4 <- data.frame("id"=over_3_4$id[duplicated(over_3_4$id)==TRUE])
+over_3_4 <- left_join(over_3_4,key,by="id")
+
+# make temp dfs to join so we can extract which genes are unique to which comparison
+temp1 <- data.frame("id"=resist1_fil$id,"origin"=rep("res1",nrow(resist1_fil)))
+temp3 <- data.frame("id"=resist3_fil$id,"origin"=rep("res3",nrow(resist3_fil)))
+temp_1_3 <- full_join(temp1,temp3,by="id")
+
+# find which genes are sig. in TF1 cells for treated and untreated resistance comparison
+non_over_1_3 <- data.frame("id"=temp_1_3$id[(temp_1_3$origin.x=="res1") & is.na(temp_1_3$origin.y)==TRUE])
+non_over_1_3 <- left_join(non_over_1_3, key, by="id")
+non_over_3_1 <- data.frame("id"=temp_1_3$id[(temp_1_3$origin.y=="res3") & is.na(temp_1_3$origin.x)==TRUE])
+non_over_3_1 <- left_join(non_over_3_1, key, by="id")
+
+# make temp dfs to join so we can extract which genes are unique to which comparison
+temp2 <- data.frame("id"=resist2_fil$id,"origin"=rep("res2",nrow(resist2_fil)))
+temp4 <- data.frame("id"=resist4_fil$id,"origin"=rep("res4",nrow(resist4_fil)))
+temp_2_4 <- full_join(temp2,temp4,by="id")
+
+# find which genes are sig. in HEL cells for treated and untreated resistance comparison
+non_over_2_4 <- data.frame("id"=temp_2_4$id[(temp_2_4$origin.x=="res2") & is.na(temp_2_4$origin.y)==TRUE])
+non_over_2_4 <- left_join(non_over_2_4, key, by="id")
+non_over_4_2 <- data.frame("id"=temp_2_4$id[(temp_2_4$origin.y=="res4") & is.na(temp_2_4$origin.x)==TRUE])
+non_over_4_2 <- left_join(non_over_4_2, key, by="id")
+
+# combine with key to get gene names instead of id numbers
+resist1_fil_genes <- left_join(resist1_fil,key,by="id")
+resist2_fil_genes <- left_join(resist2_fil,key,by="id")
+resist3_fil_genes <- left_join(resist3_fil,key,by="id")
+resist4_fil_genes <- left_join(resist4_fil,key,by="id")
+
+# write out gene lists with log2FC and pval
+write.csv(resist1_fil_genes[,2:4], "resist1_fc1_pval001.csv")
+write.csv(resist2_fil_genes[,2:4], "resist2_fc1_pval001.csv")
+write.csv(resist3_fil_genes[,2:4], "resist3_fc1_pval001.csv")
+write.csv(resist4_fil_genes[,2:4], "resist4_fc1_pval001.csv")
+write.csv(over_1_2, "resist_1_2_fil_overlap.csv")
+write.csv(over_3_4, "resist_3_4_fil_overlap.csv")
+write.csv(non_over_1_3, "resist_1_3_fil_nonoverlap.csv")
+write.csv(non_over_3_1, "resist_3_1_fil_nonoverlap.csv")
+write.csv(non_over_2_4, "resist_2_4_fil_nonoverlap.csv")
+write.csv(non_over_4_2, "resist_4_2_fil_nonoverlap.csv")
+```
+
+### TEST ###
+
+```{r}
+View(resist4_fil_genes)
+
+View(treat1_fil[,c(6,7,9)])
+View(treat2_fil[,c(6,7,9)])
+View(treat3_fil[,c(6,7,9)])
+View(treat4_fil[,c(6,7,9)])
+
+t1_t2_over <- calculate.overlap(
+  x = list(
+    "treat1" = treat1_genes,
+    "treatt2" = treat2_genes))
+
+View(t1_t2_over)
+```
+
+~~~
+
+### Visualizations ###
+
+```{r MA Plots for Resistance Comparisons}
+#par(mfrow=c(2,2))
+plotMA(resist1_res, main="TF1 Parental vs. Resistant, UT")
+plotMA(resist2_res, main="HEL Parental vs. Resistant, UT")
+plotMA(resist3_res, main="TF1 Parental vs. Resistant, T")
+plotMA(resist4_res, main="HEL Parental vs. Resistant, T")
+```
+
+```{r Resistance Comp. P-val Histograms}
+hist(resist1_res$pval, col = "lavender", main = "TF1 Parental vs. Resistant, UT", xlab = "p-values", breaks = 0:20/20, border = "white")
+hist(resist1_res$padj, col = "grey50", main = "TF1 Parental vs. Resistant, UT", xlab = "padj-values", breaks = 0:20/20, border = "white")
+
+hist(resist2_res$pval, col = "lavender", main = "HEL Parental vs. Resistant, UT", xlab = "p-values", breaks = 0:20/20, border = "white")
+hist(resist2_res$padj, col = "grey50", main = "HEL Parental vs. Resistant, UT", xlab = "padj-values", breaks = 0:20/20, border = "white")
+
+hist(resist3_res$pval, col = "lavender", main = "TF1 Parental vs. Resistant, T", xlab = "p-values", breaks = 0:20/20, border = "white")
+hist(resist3_res$padj, col = "grey50", main = "TF1 Parental vs. Resistant, T", xlab = "padj-values", breaks = 0:20/20, border = "white")
+
+hist(resist4_res$pval, col = "lavender", main = "HEL Parental vs. Resistant, T", xlab = "p-values", breaks = 0:20/20, border = "white")
+hist(resist4_res$padj, col = "grey50", main = "HEL Parental vs. Resistant, T", xlab = "padj-values", breaks = 0:20/20, border = "white")
+```
+
+```{r Resistance Comp Volcano Plots}
+pval = 0.001
+
+tiff("TF1_UT_Resistance_Comp_001.tiff", units="in", width=7, height=5, res=300)
+with(resist1_res, plot(log2FoldChange, -log10(pval), pch=16, cex=1.5, main="TF1 Par vs. Res, UT", xlim=c(-10,10)))
+with(subset(resist1_res, pval>0.001), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="gray"))
+with(subset(resist1_res, pval<0.001 & log2FoldChange>1), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="red"))
+with(subset(resist1_res, pval<0.001 & log2FoldChange<(-1)), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="blue"))
+abline(h = -log10(pval), col = "black", lty = 2, lwd=4)
+mtext(paste("pval = 0.001", pval), side = 4, at = -log10(pval), cex = 0.8, line = 0.5, las = 1)
+dev.off()
+
+tiff("HEL_UT_Resistance_Comp_001.tiff", units="in", width=7, height=5, res=300)
+with(resist2_res, plot(log2FoldChange, -log10(pval), pch=16, cex=1.5, main="HEL Par vs. Res, UT", xlim=c(-10,10)))
+with(subset(resist2_res, pval>0.001), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="gray"))
+with(subset(resist2_res, pval<0.001 & log2FoldChange>1), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="red"))
+with(subset(resist2_res, pval<0.001 & log2FoldChange<(-1)), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="blue"))
+abline(h = -log10(pval), col = "black", lty = 2, lwd=4)
+mtext(paste("pval = 0.001", pval), side = 4, at = -log10(pval), cex = 0.8, line = 0.5, las = 1)
+dev.off()
+
+tiff("TF1_T_Resistance_Comp_001.tiff", units="in", width=7, height=5, res=300)
+with(resist3_res, plot(log2FoldChange, -log10(pval), pch=16, cex=1.5, main="TF1 Par vs. Res, T", xlim=c(-10,10)))
+with(subset(resist3_res, pval>0.001), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="gray"))
+with(subset(resist3_res, pval<0.001 & log2FoldChange>1), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="red"))
+with(subset(resist3_res, pval<0.001 & log2FoldChange<(-1)), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="blue"))
+abline(h = -log10(pval), col = "black", lty = 2, lwd=4)
+mtext(paste("pval = 0.001", pval), side = 4, at = -log10(pval), cex = 0.8, line = 0.5, las = 1)
+dev.off()
+
+tiff("HEL_T_Resistance_Comp_001.tiff", units="in", width=7, height=5, res=300)
+with(resist4_res, plot(log2FoldChange, -log10(pval), pch=16, cex=1.5, main="HEL Par vs. Res, T", xlim=c(-10,10)))
+with(subset(resist4_res, pval>0.001), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="gray"))
+with(subset(resist4_res, pval<0.001 & log2FoldChange>1), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="red"))
+with(subset(resist4_res, pval<0.001 & log2FoldChange<(-1)), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="blue"))
+abline(h = -log10(pval), col = "black", lty = 2, lwd=4)
+mtext(paste("pval = 0.001", pval), side = 4, at = -log10(pval), cex = 0.8, line = 0.5, las = 1)
+dev.off()
+```
+
+~~~
+
+### Filtering for significance ###
+
+```{r Extract Sig. Genes}
+resist1_res_geneids <- left_join(resist1_res, key, by="id")
+resist2_res_geneids <- left_join(resist2_res, key, by="id")
+resist3_res_geneids <- left_join(resist3_res, key, by="id")
+resist4_res_geneids <- left_join(resist4_res, key, by="id")
+
+# filter by significance and FC
+resist1_v <- resist1_res_geneids %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+resist2_v <- resist2_res_geneids %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+resist3_v <- resist3_res_geneids %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+resist4_v <- resist4_res_geneids %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+
+resist1_genes <- as.vector(resist1_v$GeneID) 
+resist2_genes <- as.vector(resist2_v$GeneID) 
+resist3_genes <- as.vector(resist3_v$GeneID) 
+resist4_genes <- as.vector(resist4_v$GeneID) 
+
+resistance_overlap <- calculate.overlap(
+  x = list(
+    "resist1" = resist1_genes,
+    "resist2" = resist2_genes,
+    "resist3" = resist3_genes,
+    "resist4" = resist4_genes
+  )
+)
+```
+
+~~~
+
+### Heatmaps ###
+
+```{r Resistance Overlap Heatmap}
+resist_genes <- c(resistance_overlap$a4,resistance_overlap$a5,resistance_overlap$a6,resistance_overlap$a12,resistance_overlap$a1,resistance_overlap$a2,resistance_overlap$a7,resistance_overlap$a13,resistance_overlap$a3,resistance_overlap$a8,resistance_overlap$a14)
+
+gene_overlap <- c(rep("I",4),"II","III","IV",rep("V",145),rep("VI",3),rep("VII",10),rep("VIII",9),rep("IX",54),rep("X",132),rep("XI",97))
+
+resist_genes <- data.frame("GeneID"=resist_genes,"GeneOverlap"=gene_overlap)
+#View(resist_genes)
+
+z_norm <- as.data.frame(norm_rna_matrix[,c(1,7:10,15:18)])
+log_norm <- as.data.frame(norm_rna_matrix[,c(1,3:6,11:14)])
+
+z_resist_meta <- as.data.frame(left_join(resist_genes, z_norm, by="GeneID"))
+z_resist_matrix <- z_resist_meta[,3:10]
+z_resist_matrix <- as.matrix(z_resist_matrix)
+
+log_resist_meta <- as.data.frame(left_join(resist_genes, log_norm, by="GeneID"))
+log_resist_matrix <- log_resist_meta[,3:10]
+log_resist_matrix <- as.matrix(log_resist_matrix)
+
+z_heat <- data.frame("TF1_par_UT"=z_resist_matrix[,1], 
+                   "HEL_par_UT"=z_resist_matrix[,5],
+                   "TF1_par_T"=z_resist_matrix[,2], 
+                   "HEL_par_T"=z_resist_matrix[,6], 
+                   "TF1_res_UT"=z_resist_matrix[,3], 
+                   "HEL_res_UT"=z_resist_matrix[,7], 
+                   "TF1_res_T"=z_resist_matrix[,4], 
+                   "HEL_res_T"=z_resist_matrix[,8])
+
+log_heat <- data.frame("TF1_par_UT"=log_resist_matrix[,1], 
+                   "HEL_par_UT"=log_resist_matrix[,5],
+                   "TF1_par_T"=log_resist_matrix[,2], 
+                   "HEL_par_T"=log_resist_matrix[,6], 
+                   "TF1_res_UT"=log_resist_matrix[,3], 
+                   "HEL_res_UT"=log_resist_matrix[,7], 
+                   "TF1_res_T"=log_resist_matrix[,4], 
+                   "HEL_res_T"=log_resist_matrix[,8])
+
+z_heat <- as.matrix(z_heat)
+log_heat <- as.matrix(log_heat)
+
+ComplexHeatmap::Heatmap(z_heat, 
+                        split = z_resist_meta$GeneOverlap, 
+                        cluster_rows = F, 
+                        cluster_columns = F, 
+                        name = "Z-Score")
+
+ComplexHeatmap::Heatmap(log_heat, 
+                        split = log_resist_meta$GeneOverlap, 
+                        cluster_rows = F, 
+                        cluster_columns = F, 
+                        name = "Log2")
+
+                        #col = colorRamp2(c(-1, 1, 2), c("blue", "white", "red")))
+                        #row_title_rot = 90
+                        #row_title = "Group",
+                        #row_names_gp = gpar(col=c("red", "green"), fontsize = c(1,2,3,4,5,6,7,8,8,8)))
+```
+
+```{r Subset Resistance Genes Heatmap}
+resist_genes_small <- c(resistance_overlap$a5,resistance_overlap$a6,resistance_overlap$a12,resistance_overlap$a2,resistance_overlap$a7)
+gene_overlap_small <- c("II","III","IV",rep("VI",3),rep("VII",10))
+resist_genes_small <- data.frame("GeneID"=resist_genes_small,"GeneOverlap"=gene_overlap_small)
+#View(resist_genes_small)
+
+z_resist_meta_small <- as.data.frame(left_join(resist_genes_small, z_norm, by="GeneID"))
+z_resist_matrix_small <- z_resist_meta_small[,3:10]
+z_resist_matrix_small <- as.matrix(z_resist_matrix_small)
+
+z_heat_small <- data.frame("TF1_par_UT"=z_resist_matrix_small[,1], 
+                   "HEL_par_UT"=z_resist_matrix_small[,5],
+                   "TF1_par_T"=z_resist_matrix_small[,2], 
+                   "HEL_par_T"=z_resist_matrix_small[,6], 
+                   "TF1_res_UT"=z_resist_matrix_small[,3], 
+                   "HEL_res_UT"=z_resist_matrix_small[,7], 
+                   "TF1_res_T"=z_resist_matrix_small[,4], 
+                   "HEL_res_T"=z_resist_matrix_small[,8])
+
+z_heat_small <- as.matrix(z_heat_small)
+
+ComplexHeatmap::Heatmap(z_heat_small, 
+                        split = z_resist_meta_small$GeneOverlap, 
+                        cluster_rows = F, 
+                        cluster_columns = F, 
+                        name = "Z-Score")
+
+```
+
+```{r Lower Threshold}
+# filter by significance and FC
+resist1_more <- resist1_res_geneids %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+resist2_more <- resist2_res_geneids %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+resist3_more <- resist3_res_geneids %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+resist4_more <- resist4_res_geneids %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+
+resist1_genes_more <- as.vector(resist1_more$GeneID) 
+resist2_genes_more <- as.vector(resist2_more$GeneID) 
+resist3_genes_more <- as.vector(resist3_more$GeneID) 
+resist4_genes_more <- as.vector(resist4_more$GeneID) 
+
+resistance_overlap_more <- calculate.overlap(
+  x = list(
+    "resist1" = resist1_genes_more,
+    "resist2" = resist2_genes_more,
+    "resist3" = resist3_genes_more,
+    "resist4" = resist4_genes_more
+  )
+)
+
+resist_genes_more <- c(resistance_overlap_more$a5,resistance_overlap_more$a6,resistance_overlap_more$a2,resistance_overlap_more$a7)
+gene_overlap_more <- c("II",rep("III",3),rep("VI",11),rep("VII",21))
+resist_genes_more <- data.frame("GeneID"=resist_genes_more,"GeneOverlap"=gene_overlap_more)
+#View(resist_genes_more)
+
+z_resist_meta_more <- as.data.frame(left_join(resist_genes_more, z_norm, by="GeneID"))
+z_resist_matrix_more <- z_resist_meta_more[,3:10]
+z_resist_matrix_more <- as.matrix(z_resist_matrix_more)
+
+z_heat_more <- data.frame("TF1_par_UT"=z_resist_matrix_more[,1], 
+                   "HEL_par_UT"=z_resist_matrix_more[,5],
+                   "TF1_par_T"=z_resist_matrix_more[,2], 
+                   "HEL_par_T"=z_resist_matrix_more[,6], 
+                   "TF1_res_UT"=z_resist_matrix_more[,3], 
+                   "HEL_res_UT"=z_resist_matrix_more[,7], 
+                   "TF1_res_T"=z_resist_matrix_more[,4], 
+                   "HEL_res_T"=z_resist_matrix_more[,8])
+
+z_heat_more <- as.matrix(z_heat_more)
+
+tiff("Heatmap.tiff", units="in", width=7, height=5, res=300)
+ComplexHeatmap::Heatmap(z_heat_more, 
+                        split = z_resist_meta_more$GeneOverlap, 
+                        cluster_rows = F, 
+                        cluster_columns = F, 
+                        name = "Z-Score")
+dev.off()
+```
+
+```{r Resistance Venn Diagram}
+venn.diagram(x = list(
+    "TF1_UT" = resist1_genes,
+    "HEL_UT" = resist2_genes,
+    "TF1_T" = resist3_genes,
+    "HEL_T" = resist4_genes), filename="test", col = "transparent", fill = c("cornflowerblue", "indianred3", "mediumseagreen", "khaki"), alpha = 0.4, main="Parental vs. Resistant", sub="RNA-Seq", main.cex = 2, sub.cex = 1, cex=1, cat.cex=1.5)
+```
+
+~~~
+
+### Treatment comparisons ###
+
+```{r Treatment Comparison}
+treat1_cds <- cds_TF1[,c("s_1A_GeneCount","s_2A_GeneCount")]
+treat1_cds <- estimateSizeFactors(treat1_cds)
+treat1_cds <- estimateDispersions(treat1_cds, method="blind",sharingMode="fit-only")
+treat1_res <- nbinomTest(treat1_cds, "parental_untreated", "parental_treated")
+
+treat2_cds <- cds_HEL[,c("s_5A_GeneCount","s_6A_GeneCount")]
+treat2_cds <- estimateSizeFactors(treat2_cds)
+treat2_cds <- estimateDispersions(treat2_cds, method="blind",sharingMode="fit-only")
+treat2_res <- nbinomTest(treat2_cds, "parental_untreated", "parental_treated")
+
+treat3_cds <- cds_TF1[,c("s_3A_GeneCount","s_4A_GeneCount")]
+treat3_cds <- estimateSizeFactors(treat3_cds)
+treat3_cds <- estimateDispersions(treat3_cds, method="blind",sharingMode="fit-only")
+treat3_res <- nbinomTest(treat3_cds, "resistant_untreated", "resistant_treated")
+
+treat4_cds <- cds_HEL[,c("s_7A_GeneCount","s_8A_GeneCount")]
+treat4_cds <- estimateSizeFactors(treat4_cds)
+treat4_cds <- estimateDispersions(treat4_cds, method="blind",sharingMode="fit-only")
+treat4_res <- nbinomTest(treat4_cds, "resistant_untreated", "resistant_treated")
+```
+
+```{r Optimize cutoff}
+nrow(treat4_res %>% filter(pval < 0.0001 & abs(log2FoldChange) > 1))
+nrow(treat4_res %>% filter(pval < 0.001 & abs(log2FoldChange) > 1))
+nrow(treat4_res %>% filter(pval < 0.01 & abs(log2FoldChange) > 1))
+nrow(treat4_res %>% filter(pval < 0.0001 & abs(log2FoldChange) > 2.32))
+nrow(treat4_res %>% filter(pval < 0.001 & abs(log2FoldChange) > 2.32))
+nrow(treat4_res %>% filter(pval < 0.01 & abs(log2FoldChange) > 2.32))
+nrow(treat4_res %>% filter(pval < 0.0001 & abs(log2FoldChange) > 3.32))
+nrow(treat4_res %>% filter(pval < 0.001 & abs(log2FoldChange) > 3.32))
+nrow(treat4_res %>% filter(pval < 0.01 & abs(log2FoldChange) > 3.32))
+```
+
+```{r Treatment Comparison Volcano Plots}
+pval = 0.001
+
+tiff("TF1_Par_Treatment_Comp_001.tiff", units="in", width=7, height=5, res=300)
+with(treat1_res, plot(log2FoldChange, -log10(pval), pch=16, cex=1.5, main="TF1 T vs. UT, Par", xlim=c(-10,10)))
+with(subset(treat1_res, pval>0.001), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="gray"))
+with(subset(treat1_res, pval<0.001 & log2FoldChange>1), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="red"))
+with(subset(treat1_res, pval<0.001 & log2FoldChange<(-1)), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="blue"))
+abline(h = -log10(pval), col = "black", lty = 2, lwd=4)
+mtext(paste("pval = 0.01", pval), side = 4, at = -log10(pval), cex = 0.8, line = 0.5, las = 1)
+dev.off()
+
+tiff("HEL_Par_Treatment_Comp_001.tiff", units="in", width=7, height=5, res=300)
+with(treat2_res, plot(log2FoldChange, -log10(pval), pch=16, cex=1.5, main="HEL T vs. UT, Par", xlim=c(-10,10)))
+with(subset(treat2_res, pval>0.001), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="gray"))
+with(subset(treat2_res, pval<0.001 & log2FoldChange>1), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="red"))
+with(subset(treat2_res, pval<0.001 & log2FoldChange<(-1)), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="blue"))
+abline(h = -log10(pval), col = "black", lty = 2, lwd=4)
+mtext(paste("pval = 0.01", pval), side = 4, at = -log10(pval), cex = 0.8, line = 0.5, las = 1)
+dev.off()
+
+tiff("TF1_AzaRes_Treatment_Comp_001.tiff", units="in", width=7, height=5, res=300)
+with(treat3_res, plot(log2FoldChange, -log10(pval), pch=16, cex=1.5, main="TF1 T vs. UT, AzaRes", xlim=c(-10,10)))
+with(subset(treat3_res, pval>0.001), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="gray"))
+with(subset(treat3_res, pval<0.001 & log2FoldChange>1), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="red"))
+with(subset(treat3_res, pval<0.001 & log2FoldChange<(-1)), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="blue"))
+abline(h = -log10(pval), col = "black", lty = 2, lwd=4)
+mtext(paste("pval = 0.01", pval), side = 4, at = -log10(pval), cex = 0.8, line = 0.5, las = 1)
+dev.off()
+
+tiff("HEL_AzaRes_Treatment_Comp_001.tiff", units="in", width=7, height=5, res=300)
+with(treat4_res, plot(log2FoldChange, -log10(pval), pch=16, cex=1.5, main="HEL T vs. UT, AzaRes", xlim=c(-10,10)))
+with(subset(treat4_res, pval>0.001), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="gray"))
+with(subset(treat4_res, pval<0.001 & log2FoldChange>1), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="red"))
+with(subset(treat4_res, pval<0.001 & log2FoldChange<(-1)), points(log2FoldChange, -log10(pval), pch=16, cex=1.5, col="blue"))
+abline(h = -log10(pval), col = "black", lty = 2, lwd=4)
+mtext(paste("pval = 0.01", pval), side = 4, at = -log10(pval), cex = 0.8, line = 0.5, las = 1)
+dev.off()
+```
+
+```{r Extract Sig. Genes}
+treat1_v <- treat1_res %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+treat2_v <- treat2_res %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+treat3_v <- treat3_res %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+treat4_v <- treat4_res %>%
+                    filter(pval<0.001 & abs(log2FoldChange)>1)
+
+treat1_id <- data_frame("id"=treat1_v$id)
+treat2_id <- data_frame("id"=treat2_v$id)
+treat3_id <- data_frame("id"=treat3_v$id)
+treat4_id <- data_frame("id"=treat4_v$id)
+
+treat1_genes <- left_join(treat1_id, key, by="id")
+treat2_genes <- left_join(treat2_id, key, by="id")
+treat3_genes <- left_join(treat3_id, key, by="id")
+treat4_genes <- left_join(treat4_id, key, by="id")
+
+treat1_genes <- as.vector(treat1_genes$GeneID) 
+treat2_genes <- as.vector(treat2_genes$GeneID) 
+treat3_genes <- as.vector(treat3_genes$GeneID) 
+treat4_genes <- as.vector(treat4_genes$GeneID) 
+
+treatment_overlap <- calculate.overlap(
+  x = list(
+    "treat1" = treat1_genes,
+    "treat2" = treat2_genes,
+    "treat3" = treat3_genes,
+    "treat4" = treat4_genes
+  )
+)
+```
+
+```{r}
+treat1_fil <- left_join(treat1_v,key,by="id")
+treat1_fil <- treat1_fil[order(treat1_fil$GeneID),]
+treat2_fil <- left_join(treat2_v,key,by="id")
+treat2_fil <- treat2_fil[order(treat2_fil$GeneID),]
+treat3_fil <- left_join(treat3_v,key,by="id")
+treat3_fil <- treat3_fil[order(treat3_fil$GeneID),]
+treat4_fil <- left_join(treat4_v,key,by="id")
+treat4_fil <- treat4_fil[order(treat4_fil$GeneID),]
+
+#write.csv(treat1_fil[,c(6,7,9)], "treat1_fc1_pval001.csv")
+#write.csv(treat2_fil[,c(6,7,9)], "treat2_fc1_pval001.csv")
+#write.csv(treat3_fil[,c(6,7,9)], "treat3_fc1_pval001.csv")
+#write.csv(treat4_fil[,c(6,7,9)], "treat4_fc1_pval001.csv")
+```
+
+```{r Treatment Heatmap}
+treat_genes <- c(treatment_overlap$a4,treatment_overlap$a5,treatment_overlap$a6,treatment_overlap$a12,treatment_overlap$a1,treatment_overlap$a2,treatment_overlap$a7,treatment_overlap$a13,treatment_overlap$a3,treatment_overlap$a8,treatment_overlap$a14)
+
+treat_gene_overlap <- c(rep("I",4),"II","III","IV",rep("V",145),rep("VI",3),rep("VII",10),rep("VIII",9),rep("IX",54),rep("X",132),rep("XI",97))
+
+treat_genes <- data.frame("GeneID"=treat_genes,"GeneOverlap"=treat_gene_overlap)
+#View(treat_genes)
+
+z_treat_meta <- as.data.frame(left_join(treat_genes, z_norm, by="GeneID"))
+z_treat_matrix <- z_treat_meta[,3:10]
+z_treat_matrix <- as.matrix(z_treat_matrix)
+
+z_treat_heat <- data.frame("TF1_par_UT"=z_treat_matrix[,1], 
+                   "HEL_par_UT"=z_treat_matrix[,5],
+                   "TF1_par_T"=z_treat_matrix[,2], 
+                   "HEL_par_T"=z_treat_matrix[,6], 
+                   "TF1_res_UT"=z_treat_matrix[,3], 
+                   "HEL_res_UT"=z_treat_matrix[,7], 
+                   "TF1_res_T"=z_treat_matrix[,4], 
+                   "HEL_res_T"=z_treat_matrix[,8])
+
+z_treat_heat <- as.matrix(z_treat_heat)
+
+ComplexHeatmap::Heatmap(z_treat_heat, 
+                        split = z_treat_meta$GeneOverlap, 
+                        cluster_rows = F, 
+                        cluster_columns = F, 
+                        name = "Z-Score")
+
+```
+
+```{r Venn treatment overlap}
+venn.diagram(x = list(
+    "TF1_par" = treat1_genes,
+    "HEL_par" = treat2_genes,
+    "TF1_res" = treat3_genes,
+    "HEL_res" = treat4_genes), filename="Treatment_Test", col = "transparent",
+fill = c("cornflowerblue", "indianred3", "mediumseagreen", "khaki"),
+alpha = 0.4, main="Treated vs. Untreated", sub="RNA-Seq", main.cex = 2, sub.cex = 1, cex=1, cat.cex=1.5)
+```
+
+```{r}
+overlap_treat <- calculate.overlap(
+  x = list(
+    "treat1" = treat1_genes,
+    "treat2" = treat2_genes,
+    "treat3" = treat3_genes,
+    "treat4" = treat4_genes
+  )
+)
+```
+
+```{r}
+# print overlap between two parental cell lines (no complete overlap between all four cell types)
+treatment_overlap <- overlap_treat$a15
+treatment_overlap
+```
+
+```{r}
+venn.diagram(x = list(
+    "TF1_par" = treat1_genes,
+    "HEL_par" = treat2_genes,
+    "TF1_res" = treat3_genes,
+    "HEL_res" = treat4_genes), filename="Treatment_Comp_Venn", col = "transparent",
+fill = c("cornflowerblue", "indianred3", "mediumseagreen", "khaki"),
+alpha = 0.4, main="Treated vs. Untreated", sub="RNA-Seq", main.cex = 2, sub.cex = 1, cex=1, cat.cex=1.5)
+```
+
+~~~
+
+### Overlaps between cell lines ###
+```{r}
+# calculate overlap between TF1 and HEL cell lines for untreated status comparison
+overlap_resist_UT <- calculate.overlap(
+  x = list(
+    "resist1" = resist1_genes,
+    "resist2" = resist2_genes
+  )
+)
+
+# calculate overlap between TF1 and HEL cell lines for treated status comparison
+overlap_resist_T <- calculate.overlap(
+  x = list(
+    "resist3" = resist3_genes,
+    "resist4" = resist4_genes
+  )
+)
+
+# calculate overlap between TF1 and HEL cell lines for parental treatment comparison
+overlap_treat_par <- calculate.overlap(
+  x = list(
+    "treat1" = treat1_genes,
+    "treat2" = treat2_genes
+  )
+)
+
+# calculate overlap between TF1 and HEL cell lines for resistant treatment comparison
+overlap_treat_res <- calculate.overlap(
+  x = list(
+    "treat3" = treat3_genes,
+    "treat4" = treat4_genes
+  )
+)
+```
+
+```{r}
+cell_resist_UT <- overlap_resist_UT$a3
+cell_resist_T <- overlap_resist_T$a3
+cell_treat_par <- overlap_treat_par$a3
+cell_treat_res <- overlap_treat_res$a3
+```
+ 
+ ~~~
+ 
+### Venn Diagrams ###
+
+```{r}
+venn.diagram(x = list("TF1"=resist1_genes, "HEL"=resist2_genes), filename="Cell_Comp_UT", col = "transparent",
+fill = c("#8fb9ba", "#9a8fba"), alpha = 0.7, cat.pos=0, cex=2, cat.cex=1.5, cat.fontface=3, ext.text=0, fontface=2)
+
+#main="Differentially Expressed Genes \n in Resistant Cells", main.cex = 2, cex=1, cat.cex=1.5)
+
+venn.diagram(x = list("TF1" = resist3_genes, "HEL" = resist4_genes), filename="Cell_Comp_T", col = "transparent",
+fill = c("#8fb9ba", "#9a8fba"), alpha = 0.7, cat.pos=0, cex=2, cat.cex=1.5, cat.fontface=3, ext.text=0, fontface=2)
+
+#main="Differentially Expressed Genes \n in Resistant Cells Upon Treatment", main.cex = 2
+
+venn.diagram(x = list("TF1" = treat1_genes, "HEL" = treat2_genes), filename="Cell_Comp_Par", col = "transparent",
+fill = c("#8fb9ba", "#9a8fba"), alpha = 0.7, cat.pos=0, cex=2, cat.cex=1.5, cat.fontface=3, ext.text=0, fontface=2)
+
+#main="Differentially Expressed Genes \n Upon Treatment", main.cex = 2, cex=1, cat.cex=1.5)
+
+venn.diagram(x = list("TF1" = treat3_genes, "HEL" = treat4_genes), filename="Cell_Comp_AzaRes", col = "transparent",
+fill = c("#8fb9ba", "#9a8fba"), alpha = 0.7, cat.pos=0, cex=2, cat.cex=1.5, cat.fontface=3, ext.text=0, fontface=2)
+
+#main="Differentially Expressed Genes \n Upon Treatment in Resistant Cells", main.cex = 2, cex=1, cat.cex=1.5)
+```
+ 
+```{r Venn TF1 overlap}
+venn.diagram(x = list(
+    "Resist1" = resist1_genes,
+    "Resist3" = resist3_genes,
+    "Treat1" = treat1_genes,
+    "Treat3" = treat3_genes), filename="TF1_All_Comp", col = "transparent", alpha = 0.4, main="TF1 All Comparisons", sub="RNA-Seq", main.cex = 2, sub.cex = 1, cex=1, cat.cex=1.5, fill=pal)
+
+pal2 <- hp(3,option="NewtScamander")
+
+# without resist3
+venn.diagram(x = list(
+    "Resistant" = resist1_genes,
+    "Treated" = treat1_genes,
+    "Treated_Resistant" = treat3_genes), filename="TF1_3_Comp", col = "transparent", alpha = 0.4, main="TF1 Comparisons", sub="RNA-Seq", main.cex = 2, sub.cex = 1, cex=1, cat.cex=1.5, fill=pal2)
+```
+
+```{r Venn HEL overlap}
+venn.diagram(x = list(
+    "Resist2" = resist2_genes,
+    "Resist4" = resist4_genes,
+    "Treat2" = treat2_genes,
+    "Treat4" = treat4_genes), filename="HEL_All_Comp", col = "transparent", alpha = 0.4, main="HEL All Comparisons", sub="RNA-Seq", main.cex = 2, sub.cex = 1, cex=1, cat.cex=1.5, fill=pal)
+
+# without resist4
+venn.diagram(x = list(
+    "Resistant" = resist2_genes,
+    "Treated" = treat2_genes,
+    "Treated_Resistant" = treat4_genes), filename="HEL_3_Comp", col = "transparent", alpha = 0.4, main="HEL Comparisons", sub="RNA-Seq", main.cex = 2, sub.cex = 1, cex=1, cat.cex=1.5, fill=pal2)
+```
+
+```{r Overlap gene lists}
+overlap_TF1 <- calculate.overlap(
+  x = list(
+    "Resistant" = resist1_genes,
+    "Treated" = treat1_genes,
+    "Treated_Resistant" = treat3_genes
+  )
+)
+
+overlap_HEL <- calculate.overlap(
+  x = list(
+    "Resistant" = resist2_genes,
+    "Treated" = treat2_genes,
+    "Treated_Resistant" = treat4_genes
+  )
+)
+
+View(overlap_TF1)
+View(overlap_HEL)
+```
+
+```{r}
+HEL_3_overlap <- rbind(subset(resist2_res_genes, GeneID=="RPPH1"),subset(treat2_res_genes, GeneID=="RPPH1"),subset(treat4_res_genes, GeneID=="RPPH1"),subset(resist2_res_genes, GeneID=="RMRP"),subset(treat2_res_genes, GeneID=="RMRP"),subset(treat4_res_genes, GeneID=="RMRP"),subset(resist2_res_genes, GeneID=="DDIT4"),subset(treat2_res_genes, GeneID=="DDIT4"),subset(treat4_res_genes, GeneID=="DDIT4"),subset(resist2_res_genes, GeneID=="ATF3"),subset(treat2_res_genes, GeneID=="ATF3"),subset(treat4_res_genes, GeneID=="ATF3"))
+
+HEL_3_overlap
+
+#write.csv(overlap_HEL$a6, "HEL_treated_overlap.csv")
+```
+
+~~~
+
+```{r All genes with gene IDs}
+library(dplyr)
+
+resist1_res_genes <- left_join(resist1_res, key, by="id")
+resist2_res_genes <- left_join(resist2_res, key, by="id")
+resist3_res_genes <- left_join(resist3_res, key, by="id")
+resist4_res_genes <- left_join(resist4_res, key, by="id")
+
+treat1_res_genes <- left_join(treat1_res, key, by="id")
+treat2_res_genes <- left_join(treat2_res, key, by="id")
+treat3_res_genes <- left_join(treat3_res, key, by="id")
+treat4_res_genes <- left_join(treat4_res, key, by="id")
+```
+
+```{r Combine lists of all sig. genes}
+treat1_genes_df <- data.frame("GeneID"=treat1_genes)
+treat2_genes_df <- data.frame("GeneID"=treat2_genes)
+treat3_genes_df <- data.frame("GeneID"=treat3_genes)
+treat4_genes_df <- data.frame("GeneID"=treat4_genes)
+
+resist1_genes_df <- data.frame("GeneID"=resist1_genes)
+resist2_genes_df <- data.frame("GeneID"=resist2_genes)
+resist3_genes_df <- data.frame("GeneID"=resist3_genes)
+resist4_genes_df <- data.frame("GeneID"=resist4_genes)
+
+merged_genes <- rbind(treat1_genes_df,treat2_genes_df)
+merged_genes <- rbind(merged_genes,treat3_genes_df)
+merged_genes <- rbind(merged_genes,treat4_genes_df)
+merged_genes <- rbind(merged_genes,resist1_genes_df)
+merged_genes <- rbind(merged_genes,resist2_genes_df)
+merged_genes <- rbind(merged_genes,resist3_genes_df)
+merged_genes <- rbind(merged_genes,resist4_genes_df)
+merged_genes <- unique(merged_genes)
+
+merged_genes <- left_join(merged_genes, resist1_res_genes[,c(5:7,9)], by="GeneID")
+merged_genes <- left_join(merged_genes, resist2_res_genes[,c(5:7,9)], by="GeneID")
+merged_genes <- left_join(merged_genes, resist3_res_genes[,c(5:7,9)], by="GeneID")
+merged_genes <- left_join(merged_genes, resist4_res_genes[,c(5:7,9)], by="GeneID")
+merged_genes <- left_join(merged_genes, treat1_res_genes[,c(5:7,9)], by="GeneID")
+merged_genes <- left_join(merged_genes, treat2_res_genes[,c(5:7,9)], by="GeneID")
+merged_genes <- left_join(merged_genes, treat3_res_genes[,c(5:7,9)], by="GeneID")
+merged_genes <- left_join(merged_genes, treat4_res_genes[,c(5:7,9)], by="GeneID")
+merged_genes <- unique(merged_genes)
+
+write.csv(merged_genes, "merged_sig_genes.csv")
+
+colnames(merged_genes) <- c("GeneID","R1_FC","R1_log2FC","R1_pval","R2_FC","R2_log2FC","R2_pval","R3_FC","R3_log2FC","R3_pval","R4_FC","R4_log2FC","R4_pval","T1_FC","T1_log2FC","T1_pval","T2_FC","T2_log2FC","T2_pval","T3_FC","T3_log2FC","T3_pval","T4_FC","T4_log2FC","T4_pval")
+
+merged_genes_log2FC <- data.frame("GeneID" = rep(merged_genes$GeneID,8),
+                                "Log2FC" = c(merged_genes[,3], merged_genes[,6], merged_genes[,9],  merged_genes[,12], merged_genes[,15], merged_genes[,18], merged_genes[,21], merged_genes[,24]),
+                                "Comparison" = c(rep("Par-UT v Res-UT",2004), rep("Par-T v Res-T",2004), rep("Par-UT vs Par-T",2004), rep("Res-UT v Res-T",2004)))
+```
+
+```{r Bar plot of gene subset}
+bcl_fam <- subset(merged_genes_log2FC, merged_genes_log2FC$GeneID=="BCL2"| merged_genes_log2FC$GeneID=="BCL11A" | merged_genes_log2FC$GeneID=="BCL6" | merged_genes_log2FC$GeneID=="BCL3" | merged_genes_log2FC$GeneID=="CHAC1" | merged_genes_log2FC$GeneID=="ATF3" | merged_genes_log2FC$GeneID=="MIR3064" | merged_genes_log2FC$GeneID=="TSC22D3")
+
+View(bcl_fam)
+
+bcl_fam$Cell <- c(rep("TF1",8),rep("HEL",8),rep("TF1",8),rep("HEL",8),rep("TF1",8),rep("HEL",8),rep("TF1",8),rep("HEL",8))
+
+bcl_fam$Comparison <- factor(bcl_fam$Comparison,levels = c("Par-UT v Res-UT", "Par-T v Res-T", "Par-UT vs Par-T", "Res-UT v Res-T"))
+
+library(harrypotter)
+
+pal <- hp(4,option="LunaLovegood")
+  
+g <- ggplot(bcl_fam, aes(GeneID,Log2FC,fill=Comparison)) +
+  geom_bar(stat="identity",position="dodge",width=0.5,aes(fill=Comparison)) +
+  scale_fill_hp_d(option="LunaLovegood")
+  
+tiff("BCLfamtest.tiff", units="in", width=7, height=5, res=300)
+g + facet_wrap( ~ Cell, nrow=1) + 
+labs(title="Test Plot") +
+theme(plot.title = element_text(hjust=.5),axis.text.x = element_text(angle = 45))
+dev.off()
+```
+
+```{r Bar plot of HEL overlap}
+HEL_over <- subset(merged_genes_log2FC, merged_genes_log2FC$GeneID=="RPPH1"| merged_genes_log2FC$GeneID=="RMRP" | merged_genes_log2FC$GeneID=="DDIT4" | merged_genes_log2FC$GeneID=="ATF3")
+
+View(HEL_over)
+
+HEL_over$Cell <- c(rep("TF1",4),rep("HEL",4),rep("TF1",4),rep("HEL",4),rep("TF1",4),rep("HEL",4),rep("TF1",4),rep("HEL",4))
+
+HEL_over$Comparison <- factor(HEL_over$Comparison,levels = c("Par-UT v Res-UT", "Par-T v Res-T", "Par-UT vs Par-T", "Res-UT v Res-T"))
+  
+g2 <- ggplot(HEL_over, aes(GeneID,Log2FC,fill=Comparison)) +
+  geom_bar(stat="identity",position="dodge",width=0.5,aes(fill=Comparison)) +
+  scale_fill_hp_d(option="NewtScamander")
+  
+png("HELOver.png", units="in", width=7, height=5, res=300)
+g2 + facet_wrap( ~ Cell, nrow=1) + 
+labs(title="Overlap Plot") +
+theme(plot.title = element_text(hjust=.5),axis.text.x = element_text(angle = 45))
+dev.off()
+
+# subset only three comparisons
+HEL_over_3only <- subset(HEL_over, Comparison!="Par-T v Res-T")
+
+g3 <- ggplot(HEL_over_3only, aes(GeneID,Log2FC,fill=Comparison)) +
+  geom_bar(stat="identity",position="dodge",width=0.5,aes(fill=Comparison)) +
+  scale_fill_hp_d(option="NewtScamander")
+  
+png("HELOver3.png", units="in", width=7, height=5, res=300)
+g3 + facet_wrap( ~ Cell, nrow=1) + 
+labs(title="Log2FC of Overlapping Genes") +
+theme(plot.title = element_text(hjust=.5),axis.text.x = element_text(angle = 45))
+dev.off()
+```
+
+```{r}
+overlap_HEL$a6
+```
+
+```{r Bar plot of HEL treatment overlap}
+HEL_treat_over <- subset(merged_genes_log2FC, merged_genes_log2FC$GeneID=="AK4"| merged_genes_log2FC$GeneID=="HBZ" | merged_genes_log2FC$GeneID=="RPTOR" | merged_genes_log2FC$GeneID=="FAM83A" | merged_genes_log2FC$GeneID=="AGAP1" | merged_genes_log2FC$GeneID=="ASNS" | merged_genes_log2FC$GeneID=="C5orf4" | merged_genes_log2FC$GeneID=="CHAC1" | merged_genes_log2FC$GeneID=="LOC100505633" | merged_genes_log2FC$GeneID=="INHA" | merged_genes_log2FC$GeneID=="EGR3" | merged_genes_log2FC$GeneID=="GNG8")
+
+View(HEL_treat_over)
+
+HEL_treat_over$Cell <- c(rep("TF1",12),rep("HEL",12),rep("TF1",12),rep("HEL",12),rep("TF1",12),rep("HEL",12),rep("TF1",12),rep("HEL",12))
+
+# make comparisons a factor for plotting purposes
+HEL_treat_over$Comparison <- factor(HEL_treat_over$Comparison,levels = c("Par-UT v Res-UT", "Par-T v Res-T", "Par-UT vs Par-T", "Res-UT v Res-T"))
+
+# only keep the HEL cell line and two overlapping comparisons
+HEL_treat_over_sub <- subset(HEL_treat_over, Cell=="HEL" & (Comparison=="Par-UT vs Par-T"| Comparison=="Res-UT v Res-T"))
+
+# keep the three comparisons
+HEL_treat_over_sub2 <- subset(HEL_treat_over, Cell=="HEL" & Comparison!="Par-T v Res-T")
+
+# plot the two treated HEL comparison
+g4 <- ggplot(HEL_treat_over_sub, aes(GeneID,Log2FC,fill=Comparison)) +
+  geom_bar(stat="identity",position="dodge",width=0.5,aes(fill=Comparison)) +
+  scale_fill_hp_d(option="NewtScamander")
+
+# plot the three comparisons with the overlapping treat sig genes
+g5 <- ggplot(HEL_treat_over_sub2, aes(GeneID,Log2FC,fill=Comparison)) +
+  geom_bar(stat="identity",position="dodge",width=0.5,aes(fill=Comparison)) +
+  scale_fill_hp_d(option="NewtScamander")
+  
+png("HEL_treat_over_3_comp.png", units="in", width=7, height=5, res=300)
+g5 + labs(title="Log2FC of Overlapping Genes") +
+theme(plot.title = element_text(hjust=.5),axis.text.x = element_text(angle = 45))
+dev.off()
+```
+
+```{r}
+subset(combined, GeneID=="BCL3")
+```
+
+```{r Combine all datasets}
+combined <- left_join(resist1_res_genes[,c(9,5:7)], resist2_res_genes[,c(5:7,9)], by="GeneID")
+combined <- left_join(combined, resist3_res_genes[,c(5:7,9)], by="GeneID")
+combined <- left_join(combined, resist4_res_genes[,c(5:7,9)], by="GeneID")
+combined <- left_join(combined, treat1_res_genes[,c(5:7,9)], by="GeneID")
+combined <- left_join(combined, treat2_res_genes[,c(5:7,9)], by="GeneID")
+combined <- left_join(combined, treat3_res_genes[,c(5:7,9)], by="GeneID")
+combined <- left_join(combined, treat4_res_genes[,c(5:7,9)], by="GeneID")
+combined <- unique(combined)
+colnames(combined) <- c("GeneID","R1_FC","R1_log2FC","R1_pval","R2_FC","R2_log2FC","R2_pval","R3_FC","R3_log2FC","R3_pval","R4_FC","R4_log2FC","R4_pval","T1_FC","T1_log2FC","T1_pval","T2_FC","T2_log2FC","T2_pval","T3_FC","T3_log2FC","T3_pval","T4_FC","T4_log2FC","T4_pval")
+#View(combined)
+
+#write.csv(combined, "combined_rna_expr_analysis.csv")
+```
+
+
+```{r}
+subset(combined, T2_log2FC>1 & T4_log2FC<(-1) & T2_pval<0.01 & T4_pval<0.01)
+subset(combined, T4_log2FC>1 & T2_log2FC<(-1) & T2_pval<0.01 & T4_pval<0.01)
+
+subset(combined, T2_log2FC>0 & T4_log2FC<0 & T2_pval<0.01 & T4_pval<0.01)
+subset(combined, T2_log2FC<0 & T4_log2FC>0 & T2_pval<0.01 & T4_pval<0.01)
+
+subset(combined, T2_log2FC>0 & T4_log2FC<0 & (T2_pval<0.001 | T4_pval<0.001))
+subset(combined, T2_log2FC<0 & T4_log2FC>0 & (T2_pval<0.001 | T4_pval<0.001))
+
+subset(combined, T2_log2FC>0 & T4_log2FC<0 & (T2_pval<0.01 | T4_pval<0.01))
+subset(combined, T2_log2FC<0 & T4_log2FC>0)
+```
+
+```{r}
+two_genes <- subset(combined[,c(1,18,24)], GeneID=="CDH3" | GeneID=="BMPER")
+
+two_genes <- data.frame("GeneID"=rep(two_genes$GeneID,2),
+                        "log2FC"=c(two_genes$T2_log2FC,two_genes$T4_log2FC),
+                        "Comparison"=c("Treated Sensitive","Treated Sensitive","Treated Resistant","Treated Resistant"))
+
+two_genes$Comparison <- factor(two_genes$Comparison,levels = c("Treated Sensitive","Treated Resistant"))
+  
+ggplot(two_genes, aes(x=GeneID,y=log2FC,fill=Comparison)) +
+  geom_bar(stat="identity",position="dodge",width=0.5,aes(fill=Comparison),alpha=0.7) +
+  scale_fill_manual(name="",
+                    values=c("Treated Sensitive"="#D9D2ADFF","Treated Resistant"="#0072A6FF"))
+
+```
+
+```{r}
+subset(combined, GeneID=="BMPER")
+```
+
+~~~
+
+### Scatter Plot of Significant Genes ###
+
+```{r}
+HEL_Tsen_unique <- data.frame("GeneID"=overlap_HEL$a3)
+HEL_Tres_unique <- data.frame("GeneID"=overlap_HEL$a7)
+
+HEL_Tsen_unique <- merge(combined[,c(1,18,19,24,25)], HEL_Tsen_unique, by="GeneID")
+HEL_Tsen_unique$T2_log2FC[HEL_Tsen_unique$T2_log2FC==Inf] <- 10
+HEL_Tsen_unique$diff <- (HEL_Tsen_unique$T4_log2FC)-(HEL_Tsen_unique$T2_log2FC)
+
+HEL_Tres_unique <- merge(combined[,c(1,18,19,24,25)], HEL_Tres_unique, by="GeneID")
+HEL_Tres_unique <- subset(HEL_Tres_unique, GeneID!="LOC347411")
+HEL_Tres_unique$T2_log2FC[HEL_Tres_unique$T2_log2FC==Inf] <- 10
+HEL_Tres_unique$T4_log2FC[HEL_Tres_unique$T4_log2FC==Inf] <- 10
+HEL_Tres_unique$diff <- (HEL_Tres_unique$T4_log2FC)-(HEL_Tres_unique$T2_log2FC)
+
+ggplot(HEL_Tsen_unique, aes(x=T2_log2FC, y=T4_log2FC, label=GeneID)) +
+  geom_point() +
+  xlim(-10,10) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0, alpha=0.3) +
+  geom_vline(xintercept=0, alpha=0.3) +
+  geom_abline(slope=1, alpha=0.5) +
+  geom_text_repel(data = subset(HEL_Tsen_unique, abs(diff)>5), size=2)
+
+ggplot(HEL_Tres_unique, aes(x=T2_log2FC, y=T4_log2FC, label=GeneID)) +
+  geom_point() +
+  xlim(-10,10) +
+  ylim(-10,10) +
+  geom_hline(yintercept=0, alpha=0.3) +
+  geom_vline(xintercept=0, alpha=0.3) +
+  geom_abline(slope=1, alpha=0.5) +
+  geom_text_repel(data = subset(HEL_Tres_unique, abs(diff)>5), size=2)
+```
+
+~~~
+
+### Scatter of Specific Gene Families ###
+
+```{r BCL Family}
+BCL_genes <- data.frame("GeneID"=c('BCL10','BCL11A','BCL11B','BCL2','BCL2A1','BCL2L1','BCL2L10','BCL2L11','BCL2L12','BCL2L12P1','BCL2L13','BCL2L14','BCL2L15','BCL2L2','BCL2L2-PABPN1','BCL3','BCL6','BCL6B','BCL7A','BCL7B','BCL7C','BCL9','BCL9L','PMAIP1','BBC3','MCL1',
+'HRK','BID','BAX','BAD'))
+
+BCL_genes <- merge(combined[,c(1,18,19,24,25)], BCL_genes, by="GeneID")
+# HRK has no expression values in original counts matrix
+BCL_genes <- subset(BCL_genes, GeneID!="HRK")
+# make strings
+BCL_genes$GeneID <- as.character(BCL_genes$GeneID)
+# make slope column
+BCL_genes$slope <- (BCL_genes$T4_log2FC)/(BCL_genes$T2_log2FC)
+# find diff between two comparisons
+BCL_genes$diff <- (BCL_genes$T4_log2FC)-(BCL_genes$T2_log2FC)
+
+# scatter plot of log2FC of sesitive and resistant treatment
+ggplot(BCL_genes, aes(x=T2_log2FC, y=T4_log2FC, label=GeneID)) +
+  geom_point() +
+  xlim(-3,3) +
+  ylim(-3,3) +
+  geom_hline(yintercept=0, alpha=0.3) +
+  geom_vline(xintercept=0, alpha=0.3) +
+  geom_abline(slope=1, alpha=0.5) +
+  geom_text_repel(data = subset(BCL_genes,abs(diff)>0.5), size=2)
+
+```
+
+
+```{r ER Stress Response Genes}
+ER_stress_genes <- data.frame("GeneID"=as.character(c('XBP1','HSPA5','DNAJB9','SEC24D','SEC63','HYOU1','SEC61A1','P4HB','DDIT3','ERN1')))
+
+ER_stress_genes <- merge(combined[,c(1,18,19,24,25)], ER_stress_genes, by="GeneID")
+View(ER_stress_genes)
+# add diff column
+ER_stress_genes$diff <- (ER_stress_genes$T4_log2FC)-(ER_stress_genes$T2_log2FC)
+
+ggplot(ER_stress_genes, aes(x=T2_log2FC, y=T4_log2FC, label=GeneID)) +
+  geom_point() +
+  xlim(-3,3) +
+  ylim(-3,3) +
+  geom_hline(yintercept=0, alpha=0.3) +
+  geom_vline(xintercept=0, alpha=0.3) +
+  geom_abline(slope=1, alpha=0.5) +
+  geom_text_repel(data = subset(ER_stress_genes,abs(diff)>0.5), size=2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
